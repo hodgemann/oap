@@ -1,0 +1,37 @@
+{
+  "oap_version": "0.1.0",
+  "kind": "oap.casting_call",
+  "call_id": "call_2026_noir_001",
+  "director": {
+    "name": "Director X",
+    "did": "oap:ed25519:test_director_key"
+  },
+  "project": {
+    "title": "Rain Check",
+    "synopsis": "A noir short about a detective who can't sleep.",
+    "intent": "short_film",
+    "content": {
+      "nudity": "none",
+      "sexual_content": "none",
+      "blood_gore": "none",
+      "violence": "action"
+    },
+    "commercial_category": null,
+    "brand": null
+  },
+  "role": {
+    "character_name": "The Detective",
+    "description": "World-weary, sharp-eyed, mid-30s.",
+    "wardrobe_requirement": "Charcoal trench coat",
+    "requires_wardrobe_change": false,
+    "voice_required": true,
+    "audition_side": "Looking out a rainy window: 'I told you not to come back here.'"
+  },
+  "compensation": {
+    "offer": "150",
+    "currency": "USD",
+    "notes": "Payment via USDC upon handover verification."
+  },
+  "deadline": "2026-10-01T00:00:00Z",
+  "submission_endpoint": "https://director-x.example/oap/submissions"
+}

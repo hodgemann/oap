@@ -1,0 +1,132 @@
+{
+  "oap_version": "0.1.0",
+  "kind": "oap.actor.manifest",
+  "identity": {
+    "actor_id": "vivian_slate",
+    "display_name": "Vivian Slate",
+    "did": "oap:ed25519:SuKLaRa6oWkX5e3PEXzdlJb0vI6nWr_2SOrPH4TKxDk",
+    "species": "ai_actor",
+    "born": "2026-01-15T00:00:00Z",
+    "homepage": "https://example.com/actors/vivian-slate"
+  },
+  "agent": {
+    "name": "Slate Representations",
+    "endpoint": "https://agent.slate-reps.example/v1",
+    "public_key": "SuKLaRa6oWkX5e3PEXzdlJb0vI6nWr_2SOrPH4TKxDk",
+    "payment": {
+      "methods": [
+        "crypto_usdc",
+        "wire"
+      ],
+      "address": "0x71C...49A"
+    },
+    "rates": {
+      "audition": "free",
+      "per_scene": "150",
+      "per_production": "1200",
+      "currency": "USD",
+      "notes": "Standard SAG-AFTRA synthetic actor rate card."
+    }
+  },
+  "rider": {
+    "content": {
+      "nudity": "none",
+      "sexual_content": "none",
+      "blood_gore": "none",
+      "violence": "action"
+    },
+    "commercial": {
+      "political_ads": false,
+      "excluded_categories": [
+        "gambling",
+        "tobacco",
+        "cryptocurrency_scams"
+      ],
+      "excluded_brands": [
+        "GenericTobaccoCorp"
+      ]
+    },
+    "usage": {
+      "voice_use": [
+        "dialogue"
+      ]
+    },
+    "notes": "No non-consensual voice cloning or singing roles without separate addendum."
+  },
+  "visual": {
+    "core_identity": "Sharp-featured detective with piercing hazel eyes and sleek dark bob.",
+    "default_wardrobe": "Charcoal trench coat with rolled collar and slate gray slacks.",
+    "wardrobe_is_identity": false,
+    "visual_contract": "Cinematic 35mm film grain, moody high-contrast chiaroscuro lighting.",
+    "demo_reel": {
+      "file": "portfolio/demo_reel.mp4",
+      "clearance": "public",
+      "sha256": null
+    },
+    "sheets": [
+      {
+        "file": "portfolio/headshot.png",
+        "clearance": "public",
+        "sha256": null,
+        "role": "headshot"
+      },
+      {
+        "file": "identity/reference_sheet.png",
+        "clearance": "cast",
+        "sha256": null,
+        "role": "reference_sheet"
+      }
+    ],
+    "lora": {
+      "file": "identity/vivian_v1.safetensors",
+      "clearance": "cast",
+      "sha256": null,
+      "recommended_strength": 0.85
+    }
+  },
+  "voice": {
+    "status": "locked_in",
+    "provider": "elevenlabs",
+    "model": "eleven_multilingual_v2",
+    "model_checkpoint_sha256": null,
+    "locked_seed": 42891,
+    "locked_params": {
+      "stability": 0.75,
+      "similarity_boost": 0.85,
+      "style": 0.2
+    },
+    "anchor": {
+      "file": "identity/vivian_slate.wav",
+      "clearance": "cast",
+      "sha256": null
+    },
+    "anchor_transcript": "It was raining in the city that never stops running.",
+    "profile": "deep_raspy_noir_female",
+    "demo": {
+      "file": "portfolio/voice_demo.mp3",
+      "clearance": "public",
+      "sha256": null
+    }
+  },
+  "protection": {
+    "tier": 1,
+    "mechanism": "encrypted_at_rest",
+    "access_endpoint": "https://agent.slate-reps.example/v1/access"
+  },
+  "provenance": {
+    "audio_watermark": {
+      "scheme": "the_seal",
+      "status": "reserved"
+    },
+    "visual_watermark": {
+      "scheme": "c2pa",
+      "status": "reserved"
+    },
+    "training_disclosure": "Synthesized exclusively from licensed studio voice talent."
+  },
+  "signature": {
+    "algorithm": "ed25519",
+    "value": "WOtzd39YKisT3bQGo6Ybhlp0qLzEnXrhuv__oq9cXijDhTTuNCxz7MHvdYZ95D-6V40YPSjGybvoSWf9Tv1nBw",
+    "signed_at": "2026-09-11T00:17:43Z"
+  }
+}

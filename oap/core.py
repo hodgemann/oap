@@ -162,6 +162,7 @@ def new_manifest(actor_id: str, display_name: Optional[str] = None) -> Dict[str,
             "default_wardrobe": "",
             "wardrobe_is_identity": False,
             "visual_contract": "",
+            "demo_reel": {"file": None, "clearance": "public", "sha256": None},
             "sheets": [],
             "lora": {"file": None, "clearance": "cast", "sha256": None,
                      "recommended_strength": None},
@@ -231,6 +232,9 @@ def verify_signature(manifest: Dict[str, Any]) -> Tuple[bool, str]:
 def iter_asset_refs(manifest: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
     """Yield every asset dict that carries file/clearance/sha256."""
     visual = manifest.get("visual", {})
+    demo_reel = visual.get("demo_reel")
+    if demo_reel and demo_reel.get("file"):
+        yield demo_reel
     for sheet in visual.get("sheets", []):
         if sheet.get("file"):
             yield sheet
@@ -283,8 +287,9 @@ def package_actor(source_dir: str, output_path: str, tier: str = "portfolio",
                 continue
             src = os.path.join(source_dir, ref["file"])
             if os.path.isfile(src):
-                zf.write(src, ref["file"])
-                included.append(ref["file"])
+                zip_path = ref["file"].replace("\\", "/")
+                zf.write(src, zip_path)
+                included.append(zip_path)
     return {"output": output_path, "tier": tier, "included": included}
 
 
@@ -296,23 +301,36 @@ def verify_package(oap_path: str) -> Dict[str, Any]:
         try:
             manifest = json.loads(zf.read("manifest.json"))
         except KeyError:
-            return {"ok": False, "issues": ["manifest.json missing"], "checked": 0}
+            return {"ok": False, "issues": ["manifest.json missing"], "checked": 0,
+                    "signature": "manifest.json missing", "signature_valid": False}
+        except Exception as e:
+            return {"ok": False, "issues": [f"manifest.json corrupt: {e}"], "checked": 0,
+                    "signature": "manifest.json corrupt", "signature_valid": False}
+
         names = set(zf.namelist())
         for ref in iter_asset_refs(manifest):
             fn = ref["file"]
+            norm_fn = fn.replace("\\", "/")
+            zip_entry = fn if fn in names else (norm_fn if norm_fn in names else None)
             expected = ref.get("sha256")
-            if fn not in names:
+            if not zip_entry:
                 continue  # not present in this tier; verified on full handover
             if not expected:
                 issues.append(f"{fn}: present but manifest has no sha256")
                 continue
-            actual = sha256_bytes(zf.read(fn))
+            actual = sha256_bytes(zf.read(zip_entry))
             checked += 1
             if actual != expected:
                 issues.append(f"{fn}: hash mismatch")
+
     sig_ok, sig_msg = verify_signature(manifest)
+    sig = manifest.get("signature") or {}
+    has_sig = bool(sig.get("value"))
+    if has_sig and not sig_ok:
+        issues.append(f"signature: {sig_msg}")
+
     return {
-        "ok": not issues,
+        "ok": len(issues) == 0 and (sig_ok if has_sig else True),
         "issues": issues,
         "checked": checked,
         "signature": sig_msg,
@@ -320,14 +338,27 @@ def verify_package(oap_path: str) -> Dict[str, Any]:
     }
 
 
+def _is_safe_path(base_dir: str, path: str) -> bool:
+    base = os.path.abspath(base_dir)
+    target = os.path.abspath(os.path.join(base_dir, path))
+    return os.path.commonpath([base]) == os.path.commonpath([base, target])
+
+
 def import_actor(oap_path: str, target_dir: str, verify: bool = True) -> Dict[str, Any]:
-    """Extract a .oap into target_dir, preserving internal layout."""
+    """Extract a .oap into target_dir, preserving internal layout with traversal protection."""
     os.makedirs(target_dir, exist_ok=True)
     if verify:
         v = verify_package(oap_path)
         if not v["ok"]:
             return {"ok": False, "issues": v["issues"], "extracted": False}
     with zipfile.ZipFile(oap_path, "r") as zf:
+        for member in zf.infolist():
+            if not _is_safe_path(target_dir, member.filename):
+                return {
+                    "ok": False,
+                    "issues": [f"unsafe path in zip: '{member.filename}' attempts directory traversal"],
+                    "extracted": False,
+                }
         zf.extractall(target_dir)
     with open(os.path.join(target_dir, "manifest.json"), "r", encoding="utf-8") as f:
         manifest = json.load(f)
@@ -343,23 +374,37 @@ def check_rider(rider: Dict[str, Any], project: Dict[str, Any]) -> List[str]:
     rc = rider.get("content", {})
     pc = project.get("content", {})
     for key, levels in CONTENT_ENUMS.items():
-        r = rc.get(key, "none")
-        p = pc.get(key, "none")
+        r = str(rc.get(key, "none")).strip().lower()
+        p = str(pc.get(key, "none")).strip().lower()
         if r not in levels:
             r = "none"
         if p not in levels:
-            p = "none"
+            conflicts.append(
+                f"content.{key}: project level '{p}' is not a recognized rating (allowed: {levels})"
+            )
+            continue
         if levels.index(p) > levels.index(r):
             conflicts.append(f"content.{key}: project '{p}' exceeds rider '{r}'")
+
     rcomm = rider.get("commercial", {})
-    if rcomm.get("political_ads") is False and project.get("intent") == "political_ad":
+    project_intent = str(project.get("intent", "")).strip().lower()
+    if rcomm.get("political_ads") is False and project_intent in ("political_ad", "political_ads", "political"):
         conflicts.append("commercial: political ads are not permitted by this rider")
+
     cat = project.get("commercial_category")
-    if cat and cat in rcomm.get("excluded_categories", []):
-        conflicts.append(f"commercial: category '{cat}' is excluded by this rider")
+    if cat:
+        norm_cat = str(cat).strip().lower()
+        ex_cats = [str(c).strip().lower() for c in rcomm.get("excluded_categories", [])]
+        if norm_cat in ex_cats:
+            conflicts.append(f"commercial: category '{cat}' is excluded by this rider")
+
     brand = project.get("brand")
-    if brand and brand in rcomm.get("excluded_brands", []):
-        conflicts.append(f"commercial: brand '{brand}' is excluded by this rider")
+    if brand:
+        norm_brand = str(brand).strip().lower()
+        ex_brands = [str(b).strip().lower() for b in rcomm.get("excluded_brands", [])]
+        if norm_brand in ex_brands:
+            conflicts.append(f"commercial: brand '{brand}' is excluded by this rider")
+
     return conflicts
 
 
@@ -528,7 +573,23 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     if args.cmd == "package":
-        res = package_actor(args.source, args.out, args.tier, args.sign)
+        sign_key = args.sign
+        if not sign_key and "OAP_PRIVATE_KEY" in os.environ:
+            sign_key = os.environ["OAP_PRIVATE_KEY"]
+        elif sign_key:
+            if sign_key.startswith("env:"):
+                var_name = sign_key[4:]
+                sign_key = os.environ.get(var_name)
+                if not sign_key:
+                    ap.error(f"environment variable '{var_name}' not set")
+            elif sign_key.startswith("@"):
+                key_path = sign_key[1:]
+                try:
+                    with open(key_path, "r", encoding="utf-8") as f:
+                        sign_key = f.read().strip()
+                except Exception as e:
+                    ap.error(f"failed to read key file '{key_path}': {e}")
+        res = package_actor(args.source, args.out, args.tier, sign_key)
         print(json.dumps(res, indent=2))
         return 0
 
