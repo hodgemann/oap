@@ -1,7 +1,7 @@
 # Open Actor Protocol (OAP)
 ### A program-agnostic standard for casting, compensating, and protecting AI actors
-**Version 0.1.0 — Draft White Paper**
-**Status:** For public release / adoption. Reference implementation: `oap_core.py`.
+**Version 0.2.0 — Draft White Paper**
+**Status:** For public release / adoption. Reference implementation: `oap/core.py`.
 
 ---
 
@@ -19,15 +19,15 @@ made by Directors on any compliant platform. OAP standardizes three things:
 OAP is program-agnostic: any studio or builder can import `oap` and speak the standard.
 
 ## 2. Goals
-- Program-agnostic: any builder can `import oap_core` and speak the protocol.
+- Program-agnostic: any builder can `import oap` and speak the protocol.
 - Accommodate the full trust spectrum (open/CC → friends → strangers → zero-trust).
 - Protect actor IP (reference sheets, voice anchors) and Director IP (prompts, sets).
-- Pragmatic v0.1: shippable on GitHub/HuggingFace with no custom infrastructure.
+- Pragmatic v0.2: shippable on GitHub/HuggingFace with no custom infrastructure.
 - No drastic changes required for a host studio to comply.
 
-## 3. Non-Goals (v0.1)
+## 3. Non-Goals (v0.2)
 - No blockchain, no custom P2P overlay network, no mandatory cloud.
-- No enforced payment rails (rates are declarative; settlement is out of scope for v0.1).
+- No enforced payment rails (rates are declarative; settlement is out of scope for v0.2).
 - No DRM hard-guarantees (see §14, honest limits).
 - Not a rendering protocol: OAP moves identity + contracts; the compliant program renders.
 
@@ -40,7 +40,9 @@ OAP is program-agnostic: any studio or builder can import `oap` and speak the st
 | **Indexer** | Any registry (GitHub repo, HuggingFace dataset, static JSON) listing public actor packages. Decentralized by construction; no single Indexer is authoritative. |
 
 ## 5. The `.oap` Package
-A `.oap` file is a ZIP with a fixed layout:
+A `.oap` file is a ZIP containing `manifest.json` and referenced assets.
+The following directories are conventions; clearance comes from each manifest
+reference, not the directory name:
 
 ```
 actor.oap
@@ -53,8 +55,9 @@ actor.oap
 │   ├── reference_sheet.png
 │   ├── voice_anchor.wav      (locked master anchor)
 │   └── character_lora.safetensors   (optional)
-└── signatures/
-    └── manifest.sig       ← Agent's ed25519 signature over the manifest
+└── signatures/            ← optional auxiliary files (not separately verified)
+
+# The Agent signature is embedded in manifest.json, not a detached file.
 ```
 
 **Two-tier download:** the *public* `.oap` (manifest + `portfolio/`) lives on GitHub/HuggingFace.
@@ -68,7 +71,7 @@ Every asset declares a clearance. A package includes assets at or below its tier
 | Clearance | Who may hold it | Typical contents |
 |---|---|---|
 | `public` | Anyone | Watermarked headshot, demo reel, voice demo, manifest |
-| `audition` | Reserved (v0.2) | Audition-scoped, time-limited assets |
+| `audition` | Declared; no audition-only package tier yet | Audition-scoped, time-limited assets |
 | `cast` | A hired Director | Raw reference sheets, voice anchor, LoRA |
 
 ## 7. Protection Tiers (the trust spectrum)
@@ -82,46 +85,61 @@ The manifest declares a protection tier describing how `cast`-clearance assets a
 | **3** | Render proxy | Assets never delivered; rendering happens on Actor infra or a mutually-trusted service; only outputs return | Essentially everything | Needs infra; raises prompt-privacy tension |
 | **4** | Enclave (TEE) | Assets decryptable only inside a hardware enclave | Strongest local guarantee | Complex, hardware-dependent (future) |
 
-**v0.1 default: Tier 0 for friends, Tier 1 for strangers, Tier 2 hooks declared.
-Tiers 3–4 are reserved and opt-in for later.**
+**The reference packager writes plain files (Tier 0). Tier 1 encryption and Tier 2
+key delivery are studio responsibilities; declaring a tier does not implement it.
+Tiers 3–4 are reserved for later.**
 
 ### 7.1 The CLEAN ROOM rule
-Any render or asset that crosses the protocol boundary MUST pass through a
-metadata-stripping re-encode. ComfyUI save-nodes embed the full workflow JSON in output
-metadata; in Tier 3 that would leak the Director's prompts/sets. Compliant programs must
-strip this. (A host studio's single-encode assembly contract is already CLEAN-ROOM-shaped.)
+Any render or asset crossing the protocol boundary MUST be sanitized before
+hashing and signing. This includes reference sheets, voice anchors, demos, and
+generic assets. Remove PNG `tEXt`, `iTXt`, `zTXt`, EXIF and XMP metadata, image
+workflow/prompt metadata, and WAV `LIST`/`INFO` chunks. Equivalent metadata in
+other containers must also be removed. Preserve actor pixels and PCM samples;
+never mutate a signed package in place, since cleaning changes file hashes.
+
+`oap.clean_asset(source, output)` explicitly re-encodes single-frame PNG (up to
+8 bits per channel; install `open-actor-protocol[images]`) and uncompressed PCM
+WAV. PNG palette transparency is retained; other metadata is discarded. WAVs
+retain channel count, sample width, sample rate, and PCM frames. Unsupported
+formats, animated PNGs, and high-bit-depth PNGs are rejected; studios must use
+an appropriate cleaner for those formats. Conversion writes atomically and
+supports an input path equal to the output path. Packaging does not clean
+implicitly, and verification checks integrity rather than metadata hygiene.
 
 ## 8. The Manifest
-Full schema (v0.1):
+Representative manifest (v0.2; optional fields may be omitted):
 
 ```json
 {
-  "oap_version": "0.1.0",
+  "oap_version": "0.2.0",
   "kind": "oap.actor.manifest",
-
   "identity": {
     "actor_id": "vivian_slate",
     "display_name": "Vivian Slate",
-    "did": "oap:ed25519:<base64-public-key>",
+    "did": "oap:ed25519:SuKLaRa6oWkX5e3PEXzdlJb0vI6nWr_2SOrPH4TKxDk#vivian_slate",
     "species": "ai_actor",
     "born": "2026-01-15T00:00:00Z",
-    "homepage": null
+    "homepage": "https://example.com/actors/vivian-slate"
   },
-
   "agent": {
     "name": "Slate Representations",
-    "endpoint": null,
-    "public_key": "<base64-ed25519>",
-    "payment": { "methods": [], "address": null },
+    "endpoint": "https://agent.slate-reps.example/v1",
+    "public_key": "SuKLaRa6oWkX5e3PEXzdlJb0vI6nWr_2SOrPH4TKxDk",
+    "payment": {
+      "methods": [
+        "crypto_usdc",
+        "wire"
+      ],
+      "address": "0x71C...49A"
+    },
     "rates": {
       "audition": "free",
-      "per_scene": "",
-      "per_production": "",
+      "per_scene": "150",
+      "per_production": "1200",
       "currency": "USD",
-      "notes": ""
+      "notes": "Standard SAG-AFTRA synthetic actor rate card."
     }
   },
-
   "rider": {
     "content": {
       "nudity": "none",
@@ -131,47 +149,134 @@ Full schema (v0.1):
     },
     "commercial": {
       "political_ads": false,
-      "excluded_categories": [],
-      "excluded_brands": []
+      "excluded_categories": [
+        "gambling",
+        "tobacco",
+        "cryptocurrency_scams"
+      ],
+      "excluded_brands": [
+        "GenericTobaccoCorp"
+      ]
     },
-    "usage": { "voice_use": ["dialogue"] },
-    "notes": ""
+    "usage": {
+      "voice_use": [
+        "dialogue"
+      ]
+    },
+    "notes": "No non-consensual voice cloning or singing roles without separate addendum."
   },
-
   "visual": {
-    "core_identity": "",
-    "default_wardrobe": "",
+    "core_identity": "Sharp-featured detective with piercing hazel eyes and sleek dark bob.",
+    "default_wardrobe": "Charcoal trench coat with rolled collar and slate gray slacks.",
     "wardrobe_is_identity": false,
-    "visual_contract": "",
+    "visual_contract": "Sharp-featured actor with hazel eyes, a sleek dark bob, and a charcoal trench coat.",
+    "demo_reel": {
+      "file": "portfolio/demo_reel.mp4",
+      "clearance": "public",
+      "sha256": null
+    },
     "sheets": [
-      { "file": "portfolio/headshot.png", "clearance": "public", "sha256": null, "role": "headshot" },
-      { "file": "identity/reference_sheet.png", "clearance": "cast", "sha256": null, "role": "reference_sheet" }
+      {
+        "file": "portfolio/headshot.png",
+        "clearance": "public",
+        "sha256": null,
+        "role": "headshot"
+      },
+      {
+        "file": "identity/reference_sheet.png",
+        "clearance": "cast",
+        "sha256": null,
+        "role": "reference_sheet"
+      }
     ],
-    "lora": { "file": null, "clearance": "cast", "sha256": null, "recommended_strength": null }
+    "lora": {
+      "file": "identity/vivian_v1.safetensors",
+      "clearance": "cast",
+      "sha256": null,
+      "recommended_strength": 0.85
+    },
+    "height": {
+      "cm": 185,
+      "ft_in": "6'1\"",
+      "source": "director"
+    },
+    "contract": {
+      "default_sheet": "identity/reference_sheet.png",
+      "sheets": {
+        "identity/reference_sheet.png": {
+          "views": [
+            "front",
+            "profile",
+            "back"
+          ],
+          "identity": "Sharp features, hazel eyes",
+          "hair": "Sleek dark bob",
+          "makeup": "Natural",
+          "wardrobe": "Charcoal trench coat and slate gray slacks",
+          "footwear": "Black boots",
+          "accessories": "None",
+          "expression_range": "Reserved to determined",
+          "detail_notes": "Keep the bob silhouette consistent",
+          "canonical_summary": "Sharp-featured actor with hazel eyes, a sleek dark bob, and a charcoal trench coat."
+        }
+      }
+    }
   },
-
   "voice": {
     "status": "locked_in",
-    "provider": null,
-    "model": null,
+    "provider": "elevenlabs",
+    "model": "eleven_multilingual_v2",
     "model_checkpoint_sha256": null,
-    "locked_seed": null,
-    "locked_params": null,
-    "anchor": { "file": "identity/voice_anchor.wav", "clearance": "cast", "sha256": null },
-    "anchor_transcript": null,
-    "profile": null,
-    "demo": { "file": "portfolio/voice_demo.mp3", "clearance": "public", "sha256": null }
+    "locked_seed": 42891,
+    "locked_params": {
+      "stability": 0.75,
+      "similarity_boost": 0.85,
+      "style": 0.2
+    },
+    "anchor": {
+      "file": "identity/vivian_slate.wav",
+      "clearance": "cast",
+      "sha256": null
+    },
+    "anchor_transcript": "It was raining in the city that never stops running.",
+    "profile": "deep_raspy_noir_female",
+    "demo": {
+      "file": "portfolio/voice_demo.wav",
+      "clearance": "public",
+      "sha256": null
+    },
+    "profile_source": "director",
+    "model_revision": null
   },
-
-  "protection": { "tier": 1, "mechanism": "encrypted_at_rest", "access_endpoint": null },
-
+  "protection": {
+    "tier": 0,
+    "mechanism": "plain",
+    "access_endpoint": null
+  },
   "provenance": {
-    "audio_watermark": { "scheme": "the_seal", "status": "reserved" },
-    "visual_watermark": { "scheme": "c2pa", "status": "reserved" },
-    "training_disclosure": ""
+    "audio_watermark": {
+      "scheme": "the_seal",
+      "status": "reserved"
+    },
+    "visual_watermark": {
+      "scheme": "c2pa",
+      "status": "reserved"
+    },
+    "training_disclosure": "Synthesized exclusively from licensed studio voice talent."
   },
-
-  "signature": { "algorithm": "ed25519", "value": null, "signed_at": null }
+  "signature": {
+    "algorithm": "ed25519",
+    "value": null,
+    "signed_at": null
+  },
+  "assets": [
+    {
+      "file": "identity/personality.md",
+      "clearance": "cast",
+      "sha256": null,
+      "role": "personality"
+    }
+  ]
 }
 ```
 
@@ -188,6 +293,95 @@ Full schema (v0.1):
 that cannot run that provider/model MUST refuse politely, never guess. This mirrors a
 capability-card discipline: declare what you need, refuse cleanly if unsupported.
 The `anchor` (master) is `cast` clearance; the `demo` is public and is **not** the cloning source.
+
+### 8.3 Generic assets and personality
+`assets` is an optional array of `{file, clearance, sha256, role}` references.
+Like the fixed visual/voice slots, these are hashed before signing, packed by
+clearance, and verified when present. Initial role conventions are `personality`,
+`voice_take`, `outfit_sheet`, and `turnaround`; role strings are extensible.
+Personality is an asset with role `personality`, normally at `cast` clearance;
+there is no separate `identity.personality` slot. Extensions are signed but are
+not traversed for asset references. Package-time extras use this same array.
+
+Paths MUST be relative POSIX paths with no absolute roots, empty/dot/parent
+components, backslashes, NULs, or drive prefixes. `manifest.json` and the
+`signatures/` namespace are reserved. Duplicate references may share a path but
+MUST have the same clearance; the packager writes each file once. Unknown
+clearances are rejected when packaging.
+
+### 8.4 Look and height
+`visual.visual_contract` is the actor's canonical LOOK, not a production's
+lighting, lens, film grain, or rendering style. It remains a plain-text fallback.
+`visual.height` is optional/null or `{cm, ft_in, source}`: `cm` is a positive
+integer and the canonical measurement; `ft_in` is a display string, and `source`
+is `estimated`, `agent`, or `director`.
+
+`visual.contract` is optional and contains `default_sheet` (a package path or
+null) and `sheets` (an object keyed by paths listed in `visual.sheets`). Each entry
+may contain `views` (array of strings), and string fields `identity`, `hair`,
+`makeup`, `wardrobe`, `footwear`, `accessories`, `expression_range`, `detail_notes`,
+and `canonical_summary`. A non-null default MUST name an entry in this map.
+The default entry's canonical summary should match the text fallback. A contract
+may reference cast sheets absent from a public-tier ZIP.
+
+### 8.5 Voice status, provenance, and containers
+`voice.status` is `missing`, `provisional`, or `locked_in`. Provisional means a
+candidate voice exists but has not been approved as the actor's locked voice.
+`voice.profile_source` is `from_look`, `agent`, `director`, or null.
+`voice.model_revision` is an optional free string such as a model repository
+revision, useful for multi-file models. It supplements rather than redefines the
+single-file `model_checkpoint_sha256`; a revision is not an integrity hash.
+Voice anchor/demo assets may use any audio container supported by the receiving
+studio. File extensions identify containers; `voice_demo.mp3` is an example,
+not a format requirement. Unsupported capabilities must be refused explicitly.
+
+### 8.6 Actor identifiers and signing authority
+An actor identifier may be its own `oap:ed25519:<public-key>` or an Agent-scoped
+identifier `oap:ed25519:<agent-public-key>#<actor_id>`. For the latter, percent-encode
+characters outside the URI unreserved set in the actor-id fragment. One Agent
+can represent many actors without issuing each actor a key. Attestations name
+the complete actor identifier, including its fragment. This is an OAP identifier
+convention, not a claim of registration as a W3C DID method. UUID identifiers
+remain available for unsigned actors. Package signatures are verified against
+`agent.public_key`: they establish Agent authorship, not an independently
+verified actor-to-Agent delegation.
+
+### 8.7 Verification and local trust
+`verify_package(path, require_signature=False, strict=False, known_agents=None)`
+checks hashes of present referenced assets and any supplied signature. Unsigned
+packages remain acceptable by default; `require_signature=True` rejects them.
+Strict mode rejects unlisted files outside `signatures/`, unsafe ZIP member or
+asset paths, and duplicate member names. Safe directory entries are permitted.
+`signatures/` files are permitted but not authenticated separately; the Agent
+signature lives in the manifest. Import always checks path safety, even when
+hash/signature verification is disabled.
+
+Absent assets are permitted because portfolio packages intentionally omit
+higher-clearance files. Therefore `ok` is an integrity verdict for the included
+assets, not proof of a complete full handover. Strict mode does not change that.
+
+A local `known_agents.json` convention is a JSON array of trusted Agent public
+key strings. `load_known_agents(path)` reads it; the CLI accepts
+`--known-agents FILE`. No file is loaded implicitly and imports never enroll
+keys automatically. `agent_known` is null without a supplied trust list, false
+when the key is absent, and true when present. Membership is independent of
+`signature_valid` and does not change `ok`. A consumer requiring trust MUST
+require both a valid signature and `agent_known == true`. Studios should record
+the Agent key for each imported actor and surface key changes for review;
+rotation, actor binding history, and Indexer trust distribution remain local
+policy or future work.
+
+### 8.8 Version tolerance
+Readers MUST accept patch versions of each major/minor they support and ignore
+unknown object keys, while preserving them when signing or repackaging. Ignoring
+unknown fields does not authorize ignoring unsupported required capabilities.
+The 0.2 reference reader explicitly supports 0.1.x and 0.2.x. Other major/minor
+versions are rejected; future cross-minor support requires an explicit decision.
+`supports_version(version)` exposes that policy. Legacy 0.1 studios may reject
+0.2 manifests and must update their version gate; additive fields alone cannot
+make an existing reader accept a new version. Omitted 0.2 fields remain valid
+when reading 0.1 packages. The dict-based reference implementation checks
+package integrity, not full manifest schema conformance.
 
 ## 9. The Rider
 Boundary vocabulary, anchored on four content categories and extended with
@@ -211,7 +405,7 @@ A Director publishes a `oap.casting_call` document:
 
 ```json
 {
-  "oap_version": "0.1.0",
+  "oap_version": "0.2.0",
   "kind": "oap.casting_call",
   "call_id": "call_2026_noir_001",
   "director": { "name": "Director X", "did": null },
@@ -249,18 +443,18 @@ outfit sets `requires_wardrobe_change`; if `wardrobe_is_identity` is `true`, a w
 requires explicit Agent approval in the role agreement.
 
 ## 11. Compensation
-v0.1 rates are declarative and simple (`audition`, `per_scene`, `per_production`, `currency`,
+v0.2 rates are declarative and simple (`audition`, `per_scene`, `per_production`, `currency`,
 `notes`) — enough for an Agent to auto-negotiate, loose enough to ship. Settlement rails are
-out of scope for v0.1.
+out of scope for v0.2.
 
 ## 12. Transport & Distribution
-- **v0.1 — Side-channel handoff.** Public `.oap` on GitHub/HuggingFace. The Agent packages
+- **v0.2 — Side-channel handoff.** Public `.oap` on GitHub/HuggingFace. The Agent packages
   the full `.oap` into a local outbox and hands it over via the users' existing channels
   (DM, WeTransfer, private HF repo). Receiving program verifies hashes. No servers to run.
-- **v0.2 — Magic Wormhole.** One-time codes for direct encrypted box-to-box transfer.
+- **Future — Magic Wormhole.** One-time codes for direct encrypted box-to-box transfer.
   (Wormhole secures *transport*; protection tiers govern *use*. They are different problems.)
 - **`access_endpoint`.** The manifest carries an endpoint for requesting the full package;
-  in v0.1 this may be a manual inbox, later an automated Agent API.
+  in v0.2 this may be a manual inbox, later an automated Agent API.
 
 ## 13. Reputation & Sybil Resistance
 The protocol supports signed attestations (credit/blacklist) tied to DIDs, **with mandatory
@@ -274,7 +468,7 @@ anti-abuse properties**:
 - Indexers are bootstrapped from a genesis set of trusted operators; anyone may run one,
   but consumers choose which to trust.
 
-v0.1 reserves the attestation schema; it does not run a live ledger.
+v0.2 reserves the attestation schema; it does not run a live ledger.
 
 ## 14. Honest Limits (DRM reality)
 On a general-purpose computer, if a program can read an asset, the human running it can —
@@ -282,35 +476,30 @@ with enough effort — read it too. OAP therefore never promises "impossible to 
 It provides: (1) technical friction (tiers 1–4) that stops casual theft, (2) revocation and
 audit (tier 2), and (3) identity + contract + reputation that make theft consequence-laden.
 
-## 15. Compatibility with a reference studio (no drastic changes)
-OAP is designed so a host studio can adopt it with two thin translation layers and zero
-pipeline surgery. The mapping below shows how the manifest aligns with a typical studio's
-actor folder structure:
+## 15. Studio adapters
+Each studio owns its import/export adapter and its actor-record schema. OAP
+makes no assumptions about `actors/`, `refs/`, record identifiers, or overwrite
+policy. Adapters translate between the standard manifest and the studio's own
+records and asset directories.
 
-| OAP field | Reference-studio equivalent |
-|---|---|
-| `identity.actor_id` | `actors/<id>/` folder |
-| `visual.visual_contract` | the visual contract the sheet-description step writes into `actor.json` |
-| `visual.sheets` | reference-sheet images in `actors/<id>/` |
-| `voice.*` | the `actor.json` voice block (`provider`, `profile`, `ref_status`, `locked_seed`, `locked_params`, `ref_text`) + `actors/<id>/refs/<id>.wav` |
-| `rider.content` | the studio's four content-restriction categories |
-| CLEAN ROOM output | the studio's single-encode assembly contract |
-
-Export = read the studio's `actor.json` → emit `.oap`. Import = read `.oap` → scaffold a
-studio actor. Two thin translation layers; zero pipeline surgery. Per-actor rider content is
-not stored per-actor in the reference studio today (restrictions are run-level), so the bridge
-emits a default rider for the Director to edit.
+The legacy `studio_export_actor`, `oap_to_studio`, `studio-export`, and
+`studio-import` interfaces are deprecated generic examples retained for API
+compatibility in 0.2. Production integrations should use studio-owned adapters. The importer refuses to overwrite `actor.json`, keeps
+distinct WAV filenames, and cleans temporary extraction directories. Removal
+is planned for a later release.
 
 ## 16. Reference Implementation
-`oap_core.py` provides: identity generation (ed25519 DID), manifest building, packaging
-(tiered zip with SHA-256 filling), signature sign/verify, package verification, import,
-rider compatibility checking, casting-call parsing, and a studio bridge. CLI included.
-`cryptography` is optional: without it, DIDs fall back to UUID and signing is skipped.
+The `oap` package provides identity generation, manifest building, tiered ZIP
+packaging with SHA-256 filling, signing, verification, safe extraction, rider
+checks, explicit local trust lookup, and clean-room PNG/WAV conversion.
+`cryptography` is a declared runtime dependency; if unavailable, identity
+creation falls back to UUID, signing raises an error, and signed packages cannot
+verify. Optional PNG conversion uses Pillow via the `images` extra.
 
 ## 17. Roadmap
-- **v0.1** — This spec. Tier 0/1, side-channel transport, GitHub/HF distribution, rider checks,
-  hash verification, studio bridge.
-- **v0.2** — Magic Wormhole transport, Tier 2 key delivery/revocation, audition clearance tier,
-  attestation schema.
-- **Later** — Tier 3 render proxy, Tier 4 enclave, audio/visual watermark provenance
-  integration, settlement rails, live reputation ledger.
+- **v0.2** — Generic assets, structured look and height, voice provenance,
+  Agent-scoped actor identifiers, strict verification, local trust conventions,
+  clean-room asset helpers, and explicit compatibility policy.
+- **Future** — Magic Wormhole transport, Tier 1 encryption, Tier 2 key
+  delivery/revocation, audition-scoped delivery, attestation schema, Tier 3 render
+  proxy, Tier 4 enclave, watermark integration, settlement, and live reputation.

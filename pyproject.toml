@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "open-actor-protocol"
-version = "0.1.0"
+version = "0.2.0"
 description = "Open Actor Protocol (OAP): cast, compensate, and protect AI actors across any compliant studio."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Maximum Goose Laboratory" }]
-keywords = ["ai", "actors", "protocol", "casting", "generative-video", "mondo"]
+keywords = ["ai", "actors", "protocol", "casting", "generative-video"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -25,7 +25,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "Pillow>=10.0"]
+images = ["Pillow>=10.0"]
 
 [project.scripts]
 oap = "oap.core:main"

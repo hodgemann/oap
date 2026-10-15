@@ -6,7 +6,7 @@ The **Open Actor Protocol (OAP)** lets AI actor agents audition for roles in AI 
 shorts made by Directors on any platform. It is program-agnostic: any studio or builder can
 `import oap` and speak the standard.
 
-**Version:** 0.1.0 (reference implementation + spec)
+**Version:** 0.2.0 (reference implementation + spec)
 
 ---
 
@@ -42,7 +42,7 @@ oap identity
 oap package --source ./actor_src --out ./actor.oap --tier portfolio
 
 # Verify a package's hashes and signature
-oap verify --oap ./actor.oap
+oap verify --oap ./actor.oap --strict --require-signature
 
 # Import (extract + verify) a package
 oap import --oap ./actor.oap --target ./actor_installed
@@ -60,12 +60,38 @@ actor.oap (zip)
 ├── manifest.json      # the OAP manifest
 ├── portfolio/         # PUBLIC clearance: watermarked headshot, demo reel, voice demo
 ├── identity/          # CAST clearance: raw reference sheets, locked voice anchor, LoRA
-└── signatures/        # the Agent's ed25519 signature over the manifest
+└── signatures/        # optional auxiliary files; signature lives in manifest.json
 ```
 
 The manifest lists every asset with its SHA-256 and clearance. The public `.oap` ships
 anywhere (GitHub, HuggingFace); the full `.oap` (with `identity/`) is handed over only
 after the Agent approves, and the receiver verifies it against the public hashes.
+
+## New in 0.2
+
+Generic `assets` use the same clearance, hashes, packaging, and verification as
+visual sheets and voice references. Personality is an asset with role
+`personality`. Structured look/height and voice provenance fields are optional;
+0.2 readers accept 0.1.x and 0.2.x packages and preserve unknown keys.
+
+```python
+from oap import clean_asset, load_known_agents, verify_package
+
+# Install PNG support with: pip install -e '.[images]'
+# Clean before packaging/signing; PNG pixels and PCM WAV samples are preserved.
+clean_asset("raw.png", "identity/reference_sheet.png")
+result = verify_package(
+    "actor.oap", strict=True, require_signature=True,
+    known_agents=load_known_agents("known_agents.json"),
+)
+trusted = result["ok"] and result["agent_known"] is True
+```
+
+The trust file is a JSON array of Agent public keys. Without an explicit list,
+`agent_known` is null. Strict verification rejects stray files, unsafe names,
+and duplicate members; it permits assets omitted for a lower-clearance tier.
+The legacy studio bridge is deprecated; each studio owns its adapter.
+See [the 0.2 release notes](docs/RELEASE_NOTES_0.2.md) for migration details.
 
 ## Protection tiers
 
@@ -77,7 +103,8 @@ after the Agent approves, and the receiver verifies it against the public hashes
 | 3 | Render proxy | Assets never delivered; remote render | Infra required |
 | 4 | Enclave (TEE) | Hardware-enclave decryption | Future |
 
-v0.1 ships Tiers 0–1 and declares the rest. See `docs/WHITEPAPER.md`.
+The reference packager writes Tier 0 plain files. Encryption and higher-tier
+mechanisms remain studio responsibilities. See [the standard](docs/WHITEPAPER.md).
 
 ## Repository layout
 
@@ -93,7 +120,7 @@ oap/
 │   └── core.py          # the reference implementation
 ├── examples/            # sample manifest + casting call
 └── docs/
-    └── WHITEPAPER.md    # the v0.1 spec
+    └── WHITEPAPER.md    # the v0.2 spec
 ```
 
 ## License
@@ -102,8 +129,9 @@ MIT — see [LICENSE](LICENSE).
 
 ## Roadmap
 
-- **v0.1** — this release: manifest, packaging, verification, rider checks.
-- **v0.2** — Magic Wormhole transport, Tier 2 key delivery/revocation, attestation schema.
+- **v0.2** — generic assets, structured look/height, voice provenance, strict verification,
+  local Agent trust, clean-room helpers, and 0.1/0.2 read compatibility.
+- **Future** — encrypted delivery, Magic Wormhole transport, key revocation, attestation schema.
 - **Later** — Tier 3 render proxy, Tier 4 enclave, provenance watermarking, settlement.
 
 ## Acknowledgments

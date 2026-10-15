@@ -1,10 +1,10 @@
 {
-  "oap_version": "0.1.0",
+  "oap_version": "0.2.0",
   "kind": "oap.actor.manifest",
   "identity": {
     "actor_id": "vivian_slate",
     "display_name": "Vivian Slate",
-    "did": "oap:ed25519:SuKLaRa6oWkX5e3PEXzdlJb0vI6nWr_2SOrPH4TKxDk",
+    "did": "oap:ed25519:SuKLaRa6oWkX5e3PEXzdlJb0vI6nWr_2SOrPH4TKxDk#vivian_slate",
     "species": "ai_actor",
     "born": "2026-01-15T00:00:00Z",
     "homepage": "https://example.com/actors/vivian-slate"
@@ -57,7 +57,7 @@
     "core_identity": "Sharp-featured detective with piercing hazel eyes and sleek dark bob.",
     "default_wardrobe": "Charcoal trench coat with rolled collar and slate gray slacks.",
     "wardrobe_is_identity": false,
-    "visual_contract": "Cinematic 35mm film grain, moody high-contrast chiaroscuro lighting.",
+    "visual_contract": "Sharp-featured actor with hazel eyes, a sleek dark bob, and a charcoal trench coat.",
     "demo_reel": {
       "file": "portfolio/demo_reel.mp4",
       "clearance": "public",
@@ -82,6 +82,32 @@
       "clearance": "cast",
       "sha256": null,
       "recommended_strength": 0.85
+    },
+    "height": {
+      "cm": 185,
+      "ft_in": "6'1\"",
+      "source": "director"
+    },
+    "contract": {
+      "default_sheet": "identity/reference_sheet.png",
+      "sheets": {
+        "identity/reference_sheet.png": {
+          "views": [
+            "front",
+            "profile",
+            "back"
+          ],
+          "identity": "Sharp features, hazel eyes",
+          "hair": "Sleek dark bob",
+          "makeup": "Natural",
+          "wardrobe": "Charcoal trench coat and slate gray slacks",
+          "footwear": "Black boots",
+          "accessories": "None",
+          "expression_range": "Reserved to determined",
+          "detail_notes": "Keep the bob silhouette consistent",
+          "canonical_summary": "Sharp-featured actor with hazel eyes, a sleek dark bob, and a charcoal trench coat."
+        }
+      }
     }
   },
   "voice": {
@@ -103,15 +129,17 @@
     "anchor_transcript": "It was raining in the city that never stops running.",
     "profile": "deep_raspy_noir_female",
     "demo": {
-      "file": "portfolio/voice_demo.mp3",
+      "file": "portfolio/voice_demo.wav",
       "clearance": "public",
       "sha256": null
-    }
+    },
+    "profile_source": "director",
+    "model_revision": null
   },
   "protection": {
-    "tier": 1,
-    "mechanism": "encrypted_at_rest",
-    "access_endpoint": "https://agent.slate-reps.example/v1/access"
+    "tier": 0,
+    "mechanism": "plain",
+    "access_endpoint": null
   },
   "provenance": {
     "audio_watermark": {
@@ -126,7 +154,15 @@
   },
   "signature": {
     "algorithm": "ed25519",
-    "value": "WOtzd39YKisT3bQGo6Ybhlp0qLzEnXrhuv__oq9cXijDhTTuNCxz7MHvdYZ95D-6V40YPSjGybvoSWf9Tv1nBw",
-    "signed_at": "2026-09-11T00:17:43Z"
-  }
+    "value": null,
+    "signed_at": null
+  },
+  "assets": [
+    {
+      "file": "identity/personality.md",
+      "clearance": "cast",
+      "sha256": null,
+      "role": "personality"
+    }
+  ]
 }

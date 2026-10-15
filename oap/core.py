@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-oap_core.py -- Open Actor Protocol (OAP) v0.1 reference implementation.
+oap_core.py -- Open Actor Protocol (OAP) v0.2 reference implementation.
 
 Program-agnostic: any studio can import oap and speak the standard.
 
@@ -31,12 +31,16 @@ import datetime
 import hashlib
 import json
 import os
+import ntpath
+import re
+import tempfile
+import warnings
 import sys
 import uuid
 import zipfile
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-OAP_VERSION = "0.1.0"
+OAP_VERSION = "0.2.0"
 
 # --- Rider enums (ordered; a project level must not exceed the rider level) ---
 CONTENT_ENUMS: Dict[str, List[str]] = {
@@ -162,6 +166,8 @@ def new_manifest(actor_id: str, display_name: Optional[str] = None) -> Dict[str,
             "default_wardrobe": "",
             "wardrobe_is_identity": False,
             "visual_contract": "",
+            "height": None,
+            "contract": {"default_sheet": None, "sheets": {}},
             "demo_reel": {"file": None, "clearance": "public", "sha256": None},
             "sheets": [],
             "lora": {"file": None, "clearance": "cast", "sha256": None,
@@ -172,6 +178,8 @@ def new_manifest(actor_id: str, display_name: Optional[str] = None) -> Dict[str,
             "provider": None,
             "model": None,
             "model_checkpoint_sha256": None,
+            "model_revision": None,
+            "profile_source": None,
             "locked_seed": None,
             "locked_params": None,
             "anchor": {"file": None, "clearance": "cast", "sha256": None},
@@ -179,7 +187,8 @@ def new_manifest(actor_id: str, display_name: Optional[str] = None) -> Dict[str,
             "profile": None,
             "demo": {"file": None, "clearance": "public", "sha256": None},
         },
-        "protection": {"tier": 1, "mechanism": "encrypted_at_rest",
+        "assets": [],
+        "protection": {"tier": 0, "mechanism": "plain",
                        "access_endpoint": None},
         "provenance": {
             "audio_watermark": {"scheme": "the_seal", "status": "reserved"},
@@ -214,6 +223,8 @@ def verify_signature(manifest: Dict[str, Any]) -> Tuple[bool, str]:
     sig = manifest.get("signature") or {}
     pub = (manifest.get("agent") or {}).get("public_key")
     val = sig.get("value")
+    if sig.get("algorithm", "ed25519") != "ed25519":
+        return False, "unsupported signature algorithm"
     if not val or not pub:
         return False, "no signature or public key present"
     if not HAS_CRYPTO:
@@ -247,6 +258,10 @@ def iter_asset_refs(manifest: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
         if a and a.get("file"):
             yield a
 
+    for asset in manifest.get("assets", []):
+        if asset.get("file"):
+            yield asset
+
 
 # --------------------------------------------------------------------------- #
 # Packaging
@@ -266,13 +281,26 @@ def package_actor(source_dir: str, output_path: str, tier: str = "portfolio",
     max_clearance = CLEARANCE_ORDER[TIER_MAX_CLEARANCE[tier]]
 
     # Fill hashes for listed assets that exist on disk.
+    clearances = {}
     for ref in iter_asset_refs(manifest):
+        if not _safe_member_name(ref["file"]) or not _is_safe_path(source_dir, ref["file"]):
+            raise ValueError(f"unsafe asset path: {ref['file']}")
+        if ref["file"] == "manifest.json" or ref["file"].startswith("signatures/"):
+            raise ValueError("asset path is reserved")
+        clearance = ref.get("clearance", "cast")
+        if clearance not in CLEARANCE_ORDER:
+            raise ValueError(f"unknown clearance: {clearance}")
+        if ref["file"] in clearances and clearances[ref["file"]] != clearance:
+            raise ValueError("conflicting clearances for the same asset")
+        clearances[ref["file"]] = clearance
         src = os.path.join(source_dir, ref["file"])
         if os.path.isfile(src):
             ref["sha256"] = sha256_file(src)
         else:
             ref["sha256"] = None
 
+    # Hash changes invalidate any signature supplied in the source manifest.
+    manifest["signature"] = {"algorithm": "ed25519", "value": None, "signed_at": None}
     if sign_key:
         sign_manifest(manifest, sign_key)
 
@@ -286,15 +314,41 @@ def package_actor(source_dir: str, output_path: str, tier: str = "portfolio",
             if CLEARANCE_ORDER.get(clearance, 2) > max_clearance:
                 continue
             src = os.path.join(source_dir, ref["file"])
-            if os.path.isfile(src):
+            if os.path.isfile(src) and ref["file"] not in included:
                 zip_path = ref["file"].replace("\\", "/")
                 zf.write(src, zip_path)
                 included.append(zip_path)
     return {"output": output_path, "tier": tier, "included": included}
 
 
-def verify_package(oap_path: str) -> Dict[str, Any]:
+def supports_version(version: str) -> bool:
+    """0.2 readers support 0.1.x and 0.2.x; unknown minor versions need opt-in."""
+    if not isinstance(version, str) or not re.fullmatch(r"0\.(1|2)\.[0-9]+", version):
+        return False
+    return True
+
+
+def load_known_agents(path: str) -> List[str]:
+    """Read an explicit local trust store: a JSON array of Agent public keys."""
+    with open(path, encoding="utf-8") as stream:
+        keys = json.load(stream)
+    if not isinstance(keys, list) or any(not isinstance(key, str) or not key for key in keys):
+        raise ValueError("known_agents must be a JSON array of nonempty public-key strings")
+    return keys
+
+
+def verify_package(oap_path: str, require_signature: bool = False, strict: bool = False,
+                   known_agents: Optional[List[str]] = None) -> Dict[str, Any]:
     """Verify hashes + signature of a .oap without installing it."""
+    try:
+        return _verify_package(oap_path, require_signature, strict, known_agents)
+    except (OSError, ValueError, TypeError, AttributeError, KeyError, zipfile.BadZipFile) as exc:
+        return {"ok": False, "issues": [f"invalid package: {exc}"], "checked": 0,
+                "signature": "not verified", "signature_valid": False,
+                "agent_known": None if known_agents is None else False}
+
+
+def _verify_package(oap_path, require_signature, strict, known_agents):
     issues: List[str] = []
     checked = 0
     with zipfile.ZipFile(oap_path, "r") as zf:
@@ -302,12 +356,31 @@ def verify_package(oap_path: str) -> Dict[str, Any]:
             manifest = json.loads(zf.read("manifest.json"))
         except KeyError:
             return {"ok": False, "issues": ["manifest.json missing"], "checked": 0,
-                    "signature": "manifest.json missing", "signature_valid": False}
+                    "signature": "manifest.json missing", "signature_valid": False,
+                    "agent_known": None if known_agents is None else False}
         except Exception as e:
             return {"ok": False, "issues": [f"manifest.json corrupt: {e}"], "checked": 0,
-                    "signature": "manifest.json corrupt", "signature_valid": False}
+                    "signature": "manifest.json corrupt", "signature_valid": False,
+                    "agent_known": None if known_agents is None else False}
 
+        if not supports_version(manifest.get("oap_version")):
+            issues.append("unsupported oap_version")
         names = set(zf.namelist())
+        if strict:
+            allowed = {"manifest.json"} | {ref["file"] for ref in iter_asset_refs(manifest)}
+            seen = set()
+            for member in zf.infolist():
+                name = member.filename
+                if not _safe_member_name(name.rstrip("/") if member.is_dir() else name):
+                    issues.append(f"unsafe member name: {name}")
+                if name in seen:
+                    issues.append(f"duplicate member: {name}")
+                seen.add(name)
+                if not member.is_dir() and name not in allowed and not name.startswith("signatures/"):
+                    issues.append(f"unlisted member: {name}")
+            for ref in iter_asset_refs(manifest):
+                if not _safe_member_name(ref["file"]):
+                    issues.append(f"unsafe asset path: {ref['file']}")
         for ref in iter_asset_refs(manifest):
             fn = ref["file"]
             norm_fn = fn.replace("\\", "/")
@@ -326,6 +399,8 @@ def verify_package(oap_path: str) -> Dict[str, Any]:
     sig_ok, sig_msg = verify_signature(manifest)
     sig = manifest.get("signature") or {}
     has_sig = bool(sig.get("value"))
+    if require_signature and not has_sig:
+        issues.append("signature required")
     if has_sig and not sig_ok:
         issues.append(f"signature: {sig_msg}")
 
@@ -335,12 +410,21 @@ def verify_package(oap_path: str) -> Dict[str, Any]:
         "checked": checked,
         "signature": sig_msg,
         "signature_valid": sig_ok,
+        "agent_known": (None if known_agents is None else
+                        (manifest.get("agent") or {}).get("public_key") in known_agents),
     }
 
 
+def _safe_member_name(path: str) -> bool:
+    return (isinstance(path, str) and bool(path) and "\\" not in path
+            and "\x00" not in path and not path.startswith("/")
+            and not ntpath.splitdrive(path)[0]
+            and all(part not in ("", ".", "..") for part in path.split("/")))
+
+
 def _is_safe_path(base_dir: str, path: str) -> bool:
-    base = os.path.abspath(base_dir)
-    target = os.path.abspath(os.path.join(base_dir, path))
+    base = os.path.realpath(base_dir)
+    target = os.path.realpath(os.path.join(base_dir, path))
     return os.path.commonpath([base]) == os.path.commonpath([base, target])
 
 
@@ -353,7 +437,8 @@ def import_actor(oap_path: str, target_dir: str, verify: bool = True) -> Dict[st
             return {"ok": False, "issues": v["issues"], "extracted": False}
     with zipfile.ZipFile(oap_path, "r") as zf:
         for member in zf.infolist():
-            if not _is_safe_path(target_dir, member.filename):
+            if (not _safe_member_name(member.filename.rstrip("/") if member.is_dir() else member.filename)
+                    or not _is_safe_path(target_dir, member.filename)):
                 return {
                     "ok": False,
                     "issues": [f"unsafe path in zip: '{member.filename}' attempts directory traversal"],
@@ -421,15 +506,18 @@ def check_call(manifest: Dict[str, Any], casting_call: Dict[str, Any]) -> Dict[s
 
 
 # --------------------------------------------------------------------------- #
-# Studio bridge (pragmatic v0.1)
+# Deprecated generic studio bridge (legacy layout example)
 # --------------------------------------------------------------------------- #
 def studio_export_actor(studio_root: str, actor_id: str) -> Dict[str, Any]:
     """Build an OAP manifest from a studio's actors/<id>/ folder.
 
-    NOTE: the host studio stores the visual contract and voice block in actor.json.
-    Content restrictions are run-level, not per-actor, so this emits a default
-    rider for the Director to edit. Confirm exact actor.json keys on the box.
+    Deprecated generic layout example. The emitted default
+    rider must be replaced with the actor's actual restrictions by the caller.
     """
+    warnings.warn("Generic example bridge is deprecated; studios should own their adapters.",
+                  DeprecationWarning, stacklevel=2)
+    if not _safe_member_name(actor_id) or "/" in actor_id:
+        raise ValueError("actor_id must be a single safe path component")
     actor_dir = os.path.join(studio_root, "actors", actor_id)
     actor_json = os.path.join(actor_dir, "actor.json")
     with open(actor_json, "r", encoding="utf-8") as f:
@@ -476,9 +564,17 @@ def oap_to_studio(manifest: Dict[str, Any], extracted_dir: str,
                   studio_root: str, actor_id: Optional[str] = None) -> Dict[str, Any]:
     """Scaffold a studio actor from an imported (extracted) .oap."""
     actor_id = actor_id or manifest["identity"]["actor_id"]
+    warnings.warn("Generic example bridge is deprecated; studios should own their adapters.",
+                  DeprecationWarning, stacklevel=2)
+    if not _safe_member_name(actor_id) or "/" in actor_id:
+        raise ValueError("actor_id must be a single safe path component")
     actor_dir = os.path.join(studio_root, "actors", actor_id)
     refs_dir = os.path.join(actor_dir, "refs")
     os.makedirs(refs_dir, exist_ok=True)
+
+    out_json = os.path.join(actor_dir, "actor.json")
+    if os.path.exists(out_json):
+        raise FileExistsError(out_json)
 
     # Copy identity assets into the studio actor folder.
     identity_dir = os.path.join(extracted_dir, "identity")
@@ -487,7 +583,7 @@ def oap_to_studio(manifest: Dict[str, Any], extracted_dir: str,
         for fn in os.listdir(identity_dir):
             src = os.path.join(identity_dir, fn)
             if fn.endswith(".wav"):
-                dst = os.path.join(refs_dir, f"{actor_id}.wav")
+                dst = os.path.join(refs_dir, fn)
             else:
                 dst = os.path.join(actor_dir, fn)
             with open(src, "rb") as fs, open(dst, "wb") as fd:
@@ -527,7 +623,7 @@ def _read_json(path: str) -> Dict[str, Any]:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    ap = argparse.ArgumentParser(prog="oap_core", description="OAP v0.1 reference tool")
+    ap = argparse.ArgumentParser(prog="oap_core", description="OAP v0.2 reference tool")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("identity", help="generate a DID / keypair")
@@ -540,6 +636,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     p = sub.add_parser("verify", help="verify a .oap zip")
     p.add_argument("--oap", required=True)
+    p.add_argument("--strict", action="store_true")
+    p.add_argument("--require-signature", action="store_true")
+    p.add_argument("--known-agents", help="JSON file containing a list of trusted public keys")
 
     p = sub.add_parser("import", help="extract + verify a .oap into a target dir")
     p.add_argument("--oap", required=True)
@@ -594,7 +693,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     if args.cmd == "verify":
-        res = verify_package(args.oap)
+        res = verify_package(args.oap, require_signature=args.require_signature,
+                             strict=args.strict, known_agents=(load_known_agents(args.known_agents)
+                             if args.known_agents else None))
         print(json.dumps(res, indent=2))
         return 0 if res["ok"] else 1
 
@@ -620,14 +721,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     if args.cmd == "studio-import":
-        imp = import_actor(args.oap, target_dir=os.path.join(args.studio_root, ".oap_tmp"),
-                           verify=True)
-        if not imp["ok"]:
-            print(json.dumps({"ok": False, "issues": imp["issues"]}, indent=2))
-            return 1
-        res = oap_to_studio(imp["manifest"],
-                            os.path.join(args.studio_root, ".oap_tmp"),
-                            args.studio_root, args.actor)
+        with tempfile.TemporaryDirectory(prefix="oap-import-") as extracted:
+            imp = import_actor(args.oap, target_dir=extracted, verify=True)
+            if not imp["ok"]:
+                print(json.dumps({"ok": False, "issues": imp["issues"]}, indent=2))
+                return 1
+            res = oap_to_studio(imp["manifest"], extracted, args.studio_root, args.actor)
         print(json.dumps(res, indent=2))
         return 0
 

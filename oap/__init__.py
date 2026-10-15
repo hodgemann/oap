@@ -17,12 +17,16 @@ from .core import (
     iter_asset_refs,
     package_actor,
     verify_package,
+    load_known_agents,
+    supports_version,
     import_actor,
     check_rider,
     check_call,
     studio_export_actor,
     oap_to_studio,
 )
+
+from .assets import clean_asset
 
 __version__ = OAP_VERSION
 
@@ -39,6 +43,9 @@ __all__ = [
     "iter_asset_refs",
     "package_actor",
     "verify_package",
+    "load_known_agents",
+    "supports_version",
+    "clean_asset",
     "import_actor",
     "check_rider",
     "check_call",
