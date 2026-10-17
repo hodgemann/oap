@@ -1,0 +1,6 @@
+include requirements.txt
+include future_improvements.md
+include docs/WHITEPAPER.md
+include docs/RELEASE_NOTES_*.md
+include docs/future_improvements.md
+recursive-include examples *.json

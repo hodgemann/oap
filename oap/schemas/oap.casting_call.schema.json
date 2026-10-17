@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oap:casting_call:0.3",
+  "type": "object",
+  "properties": {
+    "oap_version": {
+      "type": "string",
+      "pattern": "^0\\.(1|2|3)\\.[0-9]+$"
+    },
+    "kind": {
+      "const": "oap.casting_call"
+    },
+    "call_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "director": {
+      "type": "object",
+      "properties": {
+        "did": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "project": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "object",
+          "properties": {
+            "nudity": {
+              "enum": [
+                "none",
+                "implied",
+                "explicit"
+              ]
+            },
+            "sexual_content": {
+              "enum": [
+                "none",
+                "implied",
+                "explicit"
+              ]
+            },
+            "blood_gore": {
+              "enum": [
+                "none",
+                "mild",
+                "graphic"
+              ]
+            },
+            "violence": {
+              "enum": [
+                "none",
+                "action",
+                "graphic"
+              ]
+            }
+          }
+        },
+        "intent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "synopsis": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commercial_category": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "brand": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "role": {
+      "type": "object",
+      "properties": {
+        "requires_wardrobe_change": {
+          "type": "boolean"
+        },
+        "voice_required": {
+          "type": "boolean"
+        },
+        "character_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "wardrobe_requirement": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "audition_side": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "compensation": {
+      "type": "object",
+      "properties": {
+        "offer": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "deadline": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "submission_endpoint": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "oap_version",
+    "kind",
+    "call_id",
+    "director",
+    "project",
+    "role"
+  ]
+}

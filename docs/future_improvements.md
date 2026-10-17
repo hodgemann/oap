@@ -3,6 +3,15 @@
 **Target Project**: [hodgemann/oap](https://github.com/hodgemann/oap)  
 **Context**: Following the successful hardening of the reference implementation (PR #1), this document analyzes next-generation enhancements to evolve OAP from a specification prototype into a robust industry standard for generative cinema and AI actor management.
 
+> Status update for the 0.3 release: this is a historical proposal,
+> originally assessed against 0.1. Version 0.2 shipped PNG/WAV cleaning and generic
+> multimodal assets. Version 0.3 adds offline formal validation, audition-clearance
+> packaging, and bilateral role agreements. Encryption and attestations are
+> deferred. Automatic rendering, watermarking, and expiration are not implemented.
+> See [the release notes](RELEASE_NOTES_0.3.md)
+> for the actual scope and limits; the phase labels below are proposals, not
+> shipped capability claims.
+
 ---
 
 ## 1. Architectural Gap Analysis

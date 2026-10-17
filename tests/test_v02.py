@@ -175,7 +175,7 @@ def test_deprecated_bridge_preserves_files_and_refuses_overwrite(tmp_path):
 
 
 @pytest.mark.parametrize('version,accepted', [('0.1.0', True), ('0.1.99', True),
-    ('0.2.0', True), ('0.2.100', True), ('0.3.0', False), ('1.0.0', False),
+    ('0.2.0', True), ('0.2.100', True), ('0.3.0', True), ('0.3.100', True), ('0.4.0', False), ('1.0.0', False),
     ('0.2', False), (None, False)])
 def test_version_policy(tmp_path, version, accepted):
     manifest = oap.new_manifest('lead')

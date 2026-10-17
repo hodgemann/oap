@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oap:role_agreement:0.3",
+  "type": "object",
+  "properties": {
+    "oap_version": {
+      "type": "string",
+      "pattern": "^0\\.3\\.[0-9]+$"
+    },
+    "kind": {
+      "const": "oap.role_agreement"
+    },
+    "agreement_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "call_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "actor_did": {
+      "type": "string",
+      "minLength": 1
+    },
+    "agent_did": {
+      "type": "string",
+      "pattern": "^oap:ed25519:[A-Za-z0-9_-]{43}$"
+    },
+    "director_did": {
+      "type": "string",
+      "pattern": "^oap:ed25519:[A-Za-z0-9_-]{43}$"
+    },
+    "manifest_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "call_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "accepted_compensation": {
+      "type": "object",
+      "properties": {
+        "amount": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        }
+      },
+      "required": [
+        "amount",
+        "currency"
+      ]
+    },
+    "rider_amendments": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "signatures": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "object",
+          "properties": {
+            "algorithm": {
+              "const": "ed25519"
+            },
+            "value": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{86}$"
+            }
+          },
+          "required": [
+            "algorithm",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        "director": {
+          "type": "object",
+          "properties": {
+            "algorithm": {
+              "const": "ed25519"
+            },
+            "value": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{86}$"
+            }
+          },
+          "required": [
+            "algorithm",
+            "value"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "oap_version",
+    "kind",
+    "agreement_id",
+    "call_id",
+    "actor_did",
+    "agent_did",
+    "director_did",
+    "manifest_sha256",
+    "call_sha256",
+    "accepted_compensation",
+    "rider_amendments",
+    "created_at",
+    "signatures"
+  ]
+}

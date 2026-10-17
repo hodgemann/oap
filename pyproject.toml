@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "open-actor-protocol"
-version = "0.2.0"
+version = "0.3.0"
 description = "Open Actor Protocol (OAP): cast, compensate, and protect AI actors across any compliant studio."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -22,6 +22,7 @@ classifiers = [
 ]
 dependencies = [
     "cryptography>=41.0.0",
+    "jsonschema>=4.18",
 ]
 
 [project.optional-dependencies]
@@ -36,3 +37,6 @@ Homepage = "https://github.com/hodgemann/oap"
 
 [tool.setuptools.packages.find]
 include = ["oap*"]
+
+[tool.setuptools.package-data]
+oap = ["schemas/*.json"]

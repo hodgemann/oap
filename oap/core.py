@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-oap_core.py -- Open Actor Protocol (OAP) v0.2 reference implementation.
+oap_core.py -- Open Actor Protocol (OAP) v0.3 reference implementation.
 
 Program-agnostic: any studio can import oap and speak the standard.
 
@@ -15,7 +15,7 @@ Capabilities:
 
 CLI:
   python oap_core.py identity
-  python oap_core.py package --source DIR --out FILE --tier portfolio|full [--sign PRIV_B64]
+  python oap_core.py package --source DIR --out FILE --tier portfolio|audition|full [--sign PRIV_B64]
   python oap_core.py verify --oap FILE
   python oap_core.py import --oap FILE --target DIR
   python oap_core.py check-call --manifest FILE --call FILE
@@ -40,7 +40,7 @@ import uuid
 import zipfile
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-OAP_VERSION = "0.2.0"
+OAP_VERSION = "0.3.0"
 
 # --- Rider enums (ordered; a project level must not exceed the rider level) ---
 CONTENT_ENUMS: Dict[str, List[str]] = {
@@ -52,7 +52,7 @@ CONTENT_ENUMS: Dict[str, List[str]] = {
 
 # --- Clearance ordering for tiered packaging ---
 CLEARANCE_ORDER = {"public": 0, "audition": 1, "cast": 2}
-TIER_MAX_CLEARANCE = {"portfolio": "public", "full": "cast"}
+TIER_MAX_CLEARANCE = {"portfolio": "public", "audition": "audition", "full": "cast"}
 
 # --- Optional ed25519 support ---
 try:
@@ -322,8 +322,8 @@ def package_actor(source_dir: str, output_path: str, tier: str = "portfolio",
 
 
 def supports_version(version: str) -> bool:
-    """0.2 readers support 0.1.x and 0.2.x; unknown minor versions need opt-in."""
-    if not isinstance(version, str) or not re.fullmatch(r"0\.(1|2)\.[0-9]+", version):
+    """0.3 readers support 0.1.x, 0.2.x, and 0.3.x."""
+    if not isinstance(version, str) or not re.fullmatch(r"0\.(1|2|3)\.[0-9]+", version):
         return False
     return True
 
@@ -623,7 +623,7 @@ def _read_json(path: str) -> Dict[str, Any]:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    ap = argparse.ArgumentParser(prog="oap_core", description="OAP v0.2 reference tool")
+    ap = argparse.ArgumentParser(prog="oap_core", description="OAP v0.3 reference tool")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("identity", help="generate a DID / keypair")
@@ -659,7 +659,58 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--studio-root", required=True)
     p.add_argument("--actor", default=None)
 
+    p = sub.add_parser("validate", help="validate an OAP JSON document against its bundled schema")
+    p.add_argument("--document", required=True)
+
+    p = sub.add_parser("sign-agreement", help="sign or countersign a role agreement")
+    p.add_argument("--agreement", required=True)
+    p.add_argument("--role", required=True, choices=["agent", "director"])
+    p.add_argument("--sign", required=True, help="key file (@path), env:NAME, or base64 private key")
+    p.add_argument("--out", required=True)
+    p.add_argument("--manifest", help="check source manifest before signing")
+    p.add_argument("--call", help="check source casting call before signing")
+
+    p = sub.add_parser("verify-agreement", help="require both role agreement signatures")
+    p.add_argument("--agreement", required=True)
+    p.add_argument("--manifest", help="optionally check the exact manifest binding")
+    p.add_argument("--call", help="optionally check the exact casting call binding")
+
     args = ap.parse_args(argv)
+
+    if args.cmd in ("validate", "sign-agreement", "verify-agreement"):
+        # Keep module execution (python oap/core.py) and installed entry points usable.
+        if __package__ in (None, ""):
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from oap.validation import validate_document
+        from oap.agreements import sign_agreement, verify_agreement
+        try:
+            if args.cmd == "validate":
+                result = validate_document(_read_json(args.document))
+            elif args.cmd == "verify-agreement":
+                result = verify_agreement(_read_json(args.agreement),
+                    manifest=_read_json(args.manifest) if args.manifest else None,
+                    casting_call=_read_json(args.call) if args.call else None)
+            else:
+                key = args.sign
+                if key.startswith("@"):
+                    with open(key[1:], encoding="utf-8") as stream:
+                        key = stream.read().strip()
+                elif key.startswith("env:"):
+                    key = os.environ.get(key[4:])
+                    if not key:
+                        raise ValueError("signing key environment variable is empty or unset")
+                signed = sign_agreement(_read_json(args.agreement), args.role, key,
+                    manifest=_read_json(args.manifest) if args.manifest else None,
+                    casting_call=_read_json(args.call) if args.call else None)
+                # Sign/validate before touching the output, including in-place signing.
+                with open(args.out, "w", encoding="utf-8") as stream:
+                    json.dump(signed, stream, indent=2)
+                    stream.write("\n")
+                result = {"ok": True, "output": args.out, "role": args.role}
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            result = {"ok": False, "issues": [str(exc)]}
+        print(json.dumps(result, indent=2))
+        return 0 if result["ok"] else 1
 
     if args.cmd == "identity":
         ident = generate_identity()

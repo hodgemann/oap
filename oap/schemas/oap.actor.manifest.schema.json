@@ -1,0 +1,523 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oap:actor.manifest:0.3",
+  "type": "object",
+  "properties": {
+    "oap_version": {
+      "type": "string",
+      "pattern": "^0\\.(1|2|3)\\.[0-9]+$"
+    },
+    "kind": {
+      "const": "oap.actor.manifest"
+    },
+    "identity": {
+      "type": "object",
+      "properties": {
+        "actor_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "did": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "species": {
+          "type": "string"
+        },
+        "born": {
+          "type": "string"
+        },
+        "homepage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "actor_id"
+      ]
+    },
+    "agent": {
+      "type": "object",
+      "properties": {
+        "public_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "endpoint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "payment": {
+          "type": "object",
+          "properties": {
+            "methods": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "address": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "rates": {
+          "type": "object",
+          "properties": {
+            "audition": {
+              "type": "string"
+            },
+            "per_scene": {
+              "type": "string"
+            },
+            "per_production": {
+              "type": "string"
+            },
+            "currency": {
+              "type": "string"
+            },
+            "notes": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "rider": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "object",
+          "properties": {
+            "nudity": {
+              "enum": [
+                "none",
+                "implied",
+                "explicit"
+              ]
+            },
+            "sexual_content": {
+              "enum": [
+                "none",
+                "implied",
+                "explicit"
+              ]
+            },
+            "blood_gore": {
+              "enum": [
+                "none",
+                "mild",
+                "graphic"
+              ]
+            },
+            "violence": {
+              "enum": [
+                "none",
+                "action",
+                "graphic"
+              ]
+            }
+          }
+        },
+        "commercial": {
+          "type": "object",
+          "properties": {
+            "political_ads": {
+              "type": "boolean"
+            },
+            "excluded_categories": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "excluded_brands": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "usage": {
+          "type": "object",
+          "properties": {
+            "voice_use": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "visual": {
+      "type": "object",
+      "properties": {
+        "demo_reel": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "clearance": {
+              "enum": [
+                "public",
+                "audition",
+                "cast"
+              ]
+            },
+            "sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "sheets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "clearance": {
+                "enum": [
+                  "public",
+                  "audition",
+                  "cast"
+                ]
+              },
+              "sha256": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "lora": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "clearance": {
+              "enum": [
+                "public",
+                "audition",
+                "cast"
+              ]
+            },
+            "sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "core_identity": {
+          "type": "string"
+        },
+        "default_wardrobe": {
+          "type": "string"
+        },
+        "visual_contract": {
+          "type": "string"
+        },
+        "wardrobe_is_identity": {
+          "type": "boolean"
+        },
+        "height": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "cm": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "ft_in": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
+          }
+        },
+        "contract": {
+          "type": "object",
+          "properties": {
+            "default_sheet": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "sheets": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "voice": {
+      "type": "object",
+      "properties": {
+        "anchor": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "clearance": {
+              "enum": [
+                "public",
+                "audition",
+                "cast"
+              ]
+            },
+            "sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "demo": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "clearance": {
+              "enum": [
+                "public",
+                "audition",
+                "cast"
+              ]
+            },
+            "sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "provider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model_checkpoint_sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model_revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profile_source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "anchor_transcript": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "enum": [
+            "missing",
+            "provisional",
+            "locked_in"
+          ]
+        },
+        "locked_seed": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "locked_params": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      }
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "minLength": 1
+          },
+          "clearance": {
+            "enum": [
+              "public",
+              "audition",
+              "cast"
+            ]
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "file"
+        ]
+      }
+    },
+    "protection": {
+      "type": "object",
+      "properties": {
+        "tier": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4
+        },
+        "mechanism": {
+          "type": "string",
+          "minLength": 1
+        },
+        "access_endpoint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "properties": {
+        "algorithm": {
+          "const": "ed25519"
+        },
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "provenance": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "oap_version",
+    "kind",
+    "identity"
+  ]
+}

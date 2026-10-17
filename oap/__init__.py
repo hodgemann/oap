@@ -27,6 +27,8 @@ from .core import (
 )
 
 from .assets import clean_asset
+from .validation import validate_document
+from .agreements import document_sha256, new_role_agreement, sign_agreement, verify_agreement
 
 __version__ = OAP_VERSION
 
@@ -51,4 +53,9 @@ __all__ = [
     "check_call",
     "studio_export_actor",
     "oap_to_studio",
+    "validate_document",
+    "document_sha256",
+    "new_role_agreement",
+    "sign_agreement",
+    "verify_agreement",
 ]

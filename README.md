@@ -6,7 +6,7 @@ The **Open Actor Protocol (OAP)** lets AI actor agents audition for roles in AI 
 shorts made by Directors on any platform. It is program-agnostic: any studio or builder can
 `import oap` and speak the standard.
 
-**Version:** 0.2.0 (reference implementation + spec)
+**Version:** 0.3.0 (reference implementation + spec)
 
 ---
 
@@ -67,12 +67,22 @@ The manifest lists every asset with its SHA-256 and clearance. The public `.oap`
 anywhere (GitHub, HuggingFace); the full `.oap` (with `identity/`) is handed over only
 after the Agent approves, and the receiver verifies it against the public hashes.
 
-## New in 0.2
+## New in 0.3
+
+Validate manifests/casting calls with `oap validate --document FILE`, package
+public plus audition assets using `oap package --tier audition`, and record
+bilateral Agent/Director signatures with `oap sign-agreement` and
+`oap verify-agreement`. Schemas ship with the library; unknown extension keys
+remain permitted. New readers accept 0.1.x, 0.2.x, and 0.3.x.
+See [the 0.3 release notes](docs/RELEASE_NOTES_0.3.md) for the agreement workflow,
+compatibility, and limits.
+
+## Features introduced in 0.2
 
 Generic `assets` use the same clearance, hashes, packaging, and verification as
 visual sheets and voice references. Personality is an asset with role
 `personality`. Structured look/height and voice provenance fields are optional;
-0.2 readers accept 0.1.x and 0.2.x packages and preserve unknown keys.
+0.3 readers accept 0.1.x, 0.2.x, and 0.3.x packages and preserve unknown keys.
 
 ```python
 from oap import clean_asset, load_known_agents, verify_package
@@ -131,6 +141,8 @@ MIT — see [LICENSE](LICENSE).
 
 - **v0.2** — generic assets, structured look/height, voice provenance, strict verification,
   local Agent trust, clean-room helpers, and 0.1/0.2 read compatibility.
+- **v0.3** — offline JSON Schema validation, audition-clearance packaging, and
+  countersigned role agreements.
 - **Future** — encrypted delivery, Magic Wormhole transport, key revocation, attestation schema.
 - **Later** — Tier 3 render proxy, Tier 4 enclave, provenance watermarking, settlement.
 
