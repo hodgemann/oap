@@ -116,6 +116,21 @@ See [the 0.2 release notes](docs/RELEASE_NOTES_0.2.md) for migration details.
 The reference packager writes Tier 0 plain files. Encryption and higher-tier
 mechanisms remain studio responsibilities. See [the standard](docs/WHITEPAPER.md).
 
+## Example actors
+
+Signed example actor packages live in a separate collection,
+[hodgemann/oap-actors](https://github.com/hodgemann/oap-actors), licensed
+CC BY 4.0. They are not bundled with this library, and OAP never fetches or
+trusts them automatically. Verify one offline before importing:
+
+```bash
+oap verify --oap animal_pig.oap --strict --require-signature
+```
+
+A valid signature proves which key signed the package, not that the key is
+trusted. Compare the package hash with the collection's `index.json` and decide
+signer trust yourself. Pin a collection release rather than its `main` branch.
+
 ## Repository layout
 
 ```text
