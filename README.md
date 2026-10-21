@@ -131,6 +131,14 @@ A valid signature proves which key signed the package, not that the key is
 trusted. Compare the package hash with the collection's `index.json` and decide
 signer trust yourself. Pin a collection release rather than its `main` branch.
 
+## Related: Open Prop Protocol
+
+Actors are people and characters. For inanimate props such as instruments,
+vehicles, and sets, see the sibling [Open Prop Protocol](https://github.com/hodgemann/opp)
+(OPP). It reuses OAP's ZIP bundle layout, SHA-256 asset hashes, and Ed25519 DID
+and manifest signing, but is a separate format (`.opp`) that OAP does not read.
+Signed example props live in [hodgemann/opp-props](https://github.com/hodgemann/opp-props).
+
 ## Repository layout
 
 ```text
