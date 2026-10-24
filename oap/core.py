@@ -40,7 +40,7 @@ import uuid
 import zipfile
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-OAP_VERSION = "0.3.0"
+OAP_VERSION = "0.3.1"
 
 # --- Rider enums (ordered; a project level must not exceed the rider level) ---
 CONTENT_ENUMS: Dict[str, List[str]] = {

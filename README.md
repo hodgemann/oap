@@ -6,7 +6,7 @@ The **Open Actor Protocol (OAP)** lets AI actor agents audition for roles in AI 
 shorts made by Directors on any platform. It is program-agnostic: any studio or builder can
 `import oap` and speak the standard.
 
-**Version:** 0.3.0 (reference implementation + spec)
+**Version:** 0.3.1 (reference implementation + spec)
 
 ---
 
@@ -120,8 +120,11 @@ mechanisms remain studio responsibilities. See [the standard](docs/WHITEPAPER.md
 
 Signed example actor packages live in a separate collection,
 [hodgemann/oap-actors](https://github.com/hodgemann/oap-actors), licensed
-CC BY 4.0. They are not bundled with this library, and OAP never fetches or
-trusts them automatically. Verify one offline before importing:
+CC BY 4.0. The collection currently holds nine fictional actors, including an
+animal, a robot, a henchman, and human characters such as a firefighter,
+teacher, construction worker, baker and oil painter. They are not bundled with this
+library, and OAP never fetches or trusts them automatically. Verify one
+offline before importing:
 
 ```bash
 oap verify --oap animal_pig.oap --strict --require-signature
@@ -129,7 +132,8 @@ oap verify --oap animal_pig.oap --strict --require-signature
 
 A valid signature proves which key signed the package, not that the key is
 trusted. Compare the package hash with the collection's `index.json` and decide
-signer trust yourself. Pin a collection release rather than its `main` branch.
+signer trust yourself. Pin a collection release (currently v1.0.1) rather than
+its `main` branch.
 
 ## Related: Open Prop Protocol
 
