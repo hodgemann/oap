@@ -90,6 +90,7 @@ def test_packaging_portfolio_and_full_tier():
             f.write(b"raw-reference-bytes")
 
         ident = generate_identity()
+        recipient = oap.generate_recipient_identity()
         manifest = new_manifest("actor_x")
         manifest["agent"]["public_key"] = ident["public_key"]
         manifest["visual"]["sheets"] = [
@@ -107,19 +108,21 @@ def test_packaging_portfolio_and_full_tier():
         assert "identity/ref.png" not in res_port["included"]
 
         # Verification of portfolio zip
-        v_port = verify_package(portfolio_zip)
+        v_port = verify_package(portfolio_zip, known_agents=[ident["public_key"]])
         assert v_port["ok"] is True
         assert v_port["signature_valid"] is True
         assert v_port["checked"] == 1
 
         # 2. Full package
         full_zip = os.path.join(td, "actor_full.oap")
-        res_full = package_actor(src, full_zip, tier="full", sign_key=ident["_private"])
+        res_full = package_actor(src, full_zip, tier="full", sign_key=ident["_private"],
+                                 recipient_public_keys=[recipient["public_key"]])
         assert "portfolio/headshot.png" in res_full["included"]
-        assert "identity/ref.png" in res_full["included"]
+        assert any(name.startswith("sealed/") for name in res_full["included"])
+        assert "identity/ref.png" not in res_full["included"]
 
         # Verification of full zip
-        v_full = verify_package(full_zip)
+        v_full = verify_package(full_zip, known_agents=[ident["public_key"]])
         assert v_full["ok"] is True
         assert v_full["signature_valid"] is True
         assert v_full["checked"] == 2
@@ -172,7 +175,9 @@ def test_verify_detects_tampered_asset():
         with open(img_path, "wb") as f:
             f.write(b"original")
 
+        ident = generate_identity()
         manifest = new_manifest("actor_z")
+        manifest["agent"]["public_key"] = ident["public_key"]
         manifest["visual"]["sheets"].append({
             "file": "headshot.png",
             "clearance": "public",
@@ -182,7 +187,7 @@ def test_verify_detects_tampered_asset():
             json.dump(manifest, f)
 
         zip_path = os.path.join(td, "bundle.oap")
-        package_actor(src, zip_path, tier="portfolio")
+        package_actor(src, zip_path, tier="portfolio", sign_key=ident["_private"])
 
         # Corrupt asset in zip
         bad_zip = os.path.join(td, "bad_asset.oap")
@@ -193,9 +198,9 @@ def test_verify_detects_tampered_asset():
                     content = b"tampered_bytes"
                 zout.writestr(item, content)
 
-        v = verify_package(bad_zip)
+        v = verify_package(bad_zip, known_agents=[ident["public_key"]])
         assert v["ok"] is False
-        assert any("hash mismatch" in issue for issue in v["issues"])
+        assert any("hash or size mismatch" in issue for issue in v["issues"])
 
 
 def test_safe_path_checker():
@@ -214,9 +219,9 @@ def test_import_actor_rejects_zip_slip():
             zf.writestr("../../escape.txt", "pwned")
 
         dest = os.path.join(td, "import_target")
-        res = import_actor(bad_zip, dest, verify=False)
+        res = import_actor(bad_zip, dest)
         assert res["ok"] is False
-        assert any("attempts directory traversal" in issue for issue in res["issues"])
+        assert any("unsafe" in issue for issue in res["issues"])
         assert not os.path.exists(os.path.join(td, "escape.txt"))
 
 

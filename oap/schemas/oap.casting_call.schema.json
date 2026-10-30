@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:oap:casting_call:0.3",
+  "$id": "urn:oap:casting_call:0.4",
   "type": "object",
   "properties": {
     "oap_version": {
       "type": "string",
-      "pattern": "^0\\.(1|2|3)\\.[0-9]+$"
+      "pattern": "^0\\.(1|2|3|4)\\.[0-9]+$"
     },
     "kind": {
       "const": "oap.casting_call"

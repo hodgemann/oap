@@ -1,11 +1,40 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:oap:actor.manifest:0.3",
+  "$id": "urn:oap:actor.manifest:0.4",
   "type": "object",
   "properties": {
     "oap_version": {
       "type": "string",
-      "pattern": "^0\\.(1|2|3)\\.[0-9]+$"
+      "pattern": "^0\\.(1|2|3|4)\\.[0-9]+$"
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "bundle": {
+      "type": "object",
+      "properties": {
+        "tier": {
+          "enum": [
+            "portfolio",
+            "audition",
+            "full"
+          ]
+        },
+        "members": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "tier",
+        "members"
+      ],
+      "additionalProperties": false
     },
     "kind": {
       "const": "oap.actor.manifest"
@@ -207,6 +236,13 @@
                   "type": "null"
                 }
               ]
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sealed": {
+              "$ref": "#/$defs/sealed"
             }
           }
         },
@@ -238,6 +274,13 @@
                     "type": "null"
                   }
                 ]
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sealed": {
+                "$ref": "#/$defs/sealed"
               }
             }
           }
@@ -268,6 +311,13 @@
                   "type": "null"
                 }
               ]
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sealed": {
+              "$ref": "#/$defs/sealed"
             }
           }
         },
@@ -349,6 +399,13 @@
                   "type": "null"
                 }
               ]
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sealed": {
+              "$ref": "#/$defs/sealed"
             }
           }
         },
@@ -378,6 +435,13 @@
                   "type": "null"
                 }
               ]
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sealed": {
+              "$ref": "#/$defs/sealed"
             }
           }
         },
@@ -464,6 +528,13 @@
                 "type": "null"
               }
             ]
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sealed": {
+            "$ref": "#/$defs/sealed"
           }
         },
         "required": [
@@ -519,5 +590,77 @@
     "oap_version",
     "kind",
     "identity"
-  ]
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "oap_version": {
+            "pattern": "^0\\.4\\."
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "issued_at",
+          "bundle",
+          "agent",
+          "signature"
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "sealed": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^sealed/[a-f0-9]{64}\\.bin$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "wraps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "properties": {
+              "recipient": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "public_key": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{43}$"
+              },
+              "key": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "recipient",
+              "public_key",
+              "key"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size",
+        "wraps"
+      ],
+      "additionalProperties": false
+    }
+  }
 }

@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
 """
-oap_core.py -- Open Actor Protocol (OAP) v0.3 reference implementation.
+oap_core.py -- Open Actor Protocol (OAP) v0.4 reference implementation.
 
 Program-agnostic: any studio can import oap and speak the standard.
 
 Capabilities:
-  - identity       ed25519 DID generation (falls back to UUID without `cryptography`)
-  - package        build a tiered .oap zip, fill SHA-256 hashes, optional signing
-  - verify         verify a .oap zip's hashes and signature without installing it
-  - import         extract a .oap into a target dir and verify hashes
+  - identity       Agent Ed25519 signing and Director X25519 decryption keys
+  - package        build signed tiered .oap archives and encrypt cast assets
+  - verify         check exact archive inventory, hashes, signature, and trust
+  - import         install verified archive bytes without decrypting cast assets
   - check-call     compare a casting call against an actor's rider
   - studio-export  build an OAP manifest from a studio's actors/<id>/ folder
-  - studio-import  scaffold a studio actor from an imported .oap
+  - studio-import  deprecated; encrypted 0.4 packages need studio-owned adapters
 
 CLI:
-  python oap_core.py identity
-  python oap_core.py package --source DIR --out FILE --tier portfolio|audition|full [--sign PRIV_B64]
-  python oap_core.py verify --oap FILE
-  python oap_core.py import --oap FILE --target DIR
+  python oap/core.py identity --private-out AGENT.private.json --public-out AGENT.public.json
+  python oap/core.py recipient-key --private-out DIRECTOR.private.json --public-out DIRECTOR.public.json
+  python oap/core.py package --source DIR --out FILE --tier full --sign-key-file AGENT.private.json --recipient-key DIRECTOR.public.json
+  python oap/core.py verify --oap FILE --known-agents TRUST.json
+  python oap/core.py import --oap FILE --target DIR --known-agents TRUST.json
   python oap_core.py check-call --manifest FILE --call FILE
   python oap_core.py studio-export --studio-root /path/to/studio-project --actor my_actor --out ./oap_src
   python oap_core.py studio-import --oap ./actor.oap --studio-root /path/to/studio-project
@@ -40,7 +41,10 @@ import uuid
 import zipfile
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-OAP_VERSION = "0.3.1"
+if __package__ in (None, ""):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+OAP_VERSION = "0.4.0"
 
 # --- Rider enums (ordered; a project level must not exceed the rider level) ---
 CONTENT_ENUMS: Dict[str, List[str]] = {
@@ -74,7 +78,10 @@ def _b64e(b: bytes) -> str:
 
 
 def _b64d(s: str) -> bytes:
-    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+    raw = base64.b64decode(s + "=" * (-len(s) % 4), altchars=b"-_", validate=True)
+    if _b64e(raw) != s:
+        raise ValueError("noncanonical base64url text")
+    return raw
 
 
 def now_iso() -> str:
@@ -125,6 +132,7 @@ def new_manifest(actor_id: str, display_name: Optional[str] = None) -> Dict[str,
     return {
         "oap_version": OAP_VERSION,
         "kind": "oap.actor.manifest",
+        "issued_at": now_iso(),
         "identity": {
             "actor_id": actor_id,
             "display_name": display_name or actor_id,
@@ -195,7 +203,8 @@ def new_manifest(actor_id: str, display_name: Optional[str] = None) -> Dict[str,
             "visual_watermark": {"scheme": "c2pa", "status": "reserved"},
             "training_disclosure": "",
         },
-        "signature": {"algorithm": "ed25519", "value": None, "signed_at": None},
+        "bundle": {"tier": "portfolio", "members": []},
+        "signature": {"algorithm": "ed25519", "value": None},
     }
 
 
@@ -203,6 +212,9 @@ def new_manifest(actor_id: str, display_name: Optional[str] = None) -> Dict[str,
 # Signing
 # --------------------------------------------------------------------------- #
 def _canonical(manifest: Dict[str, Any]) -> bytes:
+    if isinstance(manifest.get("oap_version"), str) and supports_version(manifest["oap_version"]):
+        from oap.v04 import manifest_payload
+        return manifest_payload(manifest)
     m = dict(manifest)
     m.pop("signature", None)
     return json.dumps(m, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -212,19 +224,28 @@ def sign_manifest(manifest: Dict[str, Any], private_b64: str) -> Dict[str, Any]:
     if not HAS_CRYPTO:
         raise RuntimeError("Signing requires the `cryptography` package.")
     sk = Ed25519PrivateKey.from_private_bytes(_b64d(private_b64))
+    if isinstance(manifest.get("oap_version"), str) and supports_version(manifest["oap_version"]):
+        public = _b64e(sk.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw))
+        if (manifest.get("agent") or {}).get("public_key") != public:
+            raise ValueError("Agent signing key does not match manifest public key")
     sig = sk.sign(_canonical(manifest))
-    manifest["signature"] = {
-        "algorithm": "ed25519", "value": _b64e(sig), "signed_at": now_iso(),
-    }
+    manifest["signature"] = ({"algorithm": "ed25519", "value": _b64e(sig)}
+                             if supports_version(manifest.get("oap_version")) else
+                             {"algorithm": "ed25519", "value": _b64e(sig), "signed_at": now_iso()})
     return manifest
 
 
 def verify_signature(manifest: Dict[str, Any]) -> Tuple[bool, str]:
     sig = manifest.get("signature") or {}
+    if not isinstance(sig, dict):
+        return False, "invalid signature descriptor"
     pub = (manifest.get("agent") or {}).get("public_key")
     val = sig.get("value")
     if sig.get("algorithm", "ed25519") != "ed25519":
         return False, "unsupported signature algorithm"
+    if supports_version(manifest.get("oap_version")) and set(sig) != {"algorithm", "value"}:
+        return False, "invalid OAP 0.4 signature descriptor"
     if not val or not pub:
         return False, "no signature or public key present"
     if not HAS_CRYPTO:
@@ -267,63 +288,16 @@ def iter_asset_refs(manifest: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
 # Packaging
 # --------------------------------------------------------------------------- #
 def package_actor(source_dir: str, output_path: str, tier: str = "portfolio",
-                  sign_key: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Build a .oap zip from a source dir containing manifest.json plus the asset
-    files it references. Fills SHA-256 hashes, filters by clearance vs tier.
-    """
-    if tier not in TIER_MAX_CLEARANCE:
-        raise ValueError(f"tier must be one of {list(TIER_MAX_CLEARANCE)}")
-    manifest_path = os.path.join(source_dir, "manifest.json")
-    with open(manifest_path, "r", encoding="utf-8") as f:
-        manifest = json.load(f)
-
-    max_clearance = CLEARANCE_ORDER[TIER_MAX_CLEARANCE[tier]]
-
-    # Fill hashes for listed assets that exist on disk.
-    clearances = {}
-    for ref in iter_asset_refs(manifest):
-        if not _safe_member_name(ref["file"]) or not _is_safe_path(source_dir, ref["file"]):
-            raise ValueError(f"unsafe asset path: {ref['file']}")
-        if ref["file"] == "manifest.json" or ref["file"].startswith("signatures/"):
-            raise ValueError("asset path is reserved")
-        clearance = ref.get("clearance", "cast")
-        if clearance not in CLEARANCE_ORDER:
-            raise ValueError(f"unknown clearance: {clearance}")
-        if ref["file"] in clearances and clearances[ref["file"]] != clearance:
-            raise ValueError("conflicting clearances for the same asset")
-        clearances[ref["file"]] = clearance
-        src = os.path.join(source_dir, ref["file"])
-        if os.path.isfile(src):
-            ref["sha256"] = sha256_file(src)
-        else:
-            ref["sha256"] = None
-
-    # Hash changes invalidate any signature supplied in the source manifest.
-    manifest["signature"] = {"algorithm": "ed25519", "value": None, "signed_at": None}
-    if sign_key:
-        sign_manifest(manifest, sign_key)
-
-    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-    included = ["manifest.json"]
-    with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("manifest.json",
-                    json.dumps(manifest, indent=2, sort_keys=False))
-        for ref in iter_asset_refs(manifest):
-            clearance = ref.get("clearance", "cast")
-            if CLEARANCE_ORDER.get(clearance, 2) > max_clearance:
-                continue
-            src = os.path.join(source_dir, ref["file"])
-            if os.path.isfile(src) and ref["file"] not in included:
-                zip_path = ref["file"].replace("\\", "/")
-                zf.write(src, zip_path)
-                included.append(zip_path)
-    return {"output": output_path, "tier": tier, "included": included}
+                  sign_key: Optional[str] = None,
+                  recipient_public_keys: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Create a signed OAP 0.4 archive; seal cast assets for named recipients."""
+    from oap.v04 import package_actor as package_v04
+    return package_v04(source_dir, output_path, tier, sign_key, recipient_public_keys)
 
 
 def supports_version(version: str) -> bool:
-    """0.3 readers support 0.1.x, 0.2.x, and 0.3.x."""
-    if not isinstance(version, str) or not re.fullmatch(r"0\.(1|2|3)\.[0-9]+", version):
+    """Normal readers accept OAP 0.4.x; older formats use explicit legacy mode."""
+    if not isinstance(version, str) or not re.fullmatch(r"0\.4\.[0-9]+", version):
         return False
     return True
 
@@ -338,8 +312,18 @@ def load_known_agents(path: str) -> List[str]:
 
 
 def verify_package(oap_path: str, require_signature: bool = False, strict: bool = False,
-                   known_agents: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Verify hashes + signature of a .oap without installing it."""
+                   known_agents: Optional[List[str]] = None, *,
+                   allow_untrusted: bool = False, legacy: bool = False,
+                   max_members: Optional[int] = None, max_member: Optional[int] = None,
+                   max_total: Optional[int] = None) -> Dict[str, Any]:
+    """Verify an OAP 0.4 package; old formats need explicit legacy=True."""
+    if not legacy:
+        from oap.v04 import (verify_package as verify_v04, MAX_MEMBERS, MAX_MEMBER, MAX_TOTAL)
+        return verify_v04(oap_path, known_agents=known_agents,
+                          allow_untrusted=allow_untrusted,
+                          max_members=MAX_MEMBERS if max_members is None else max_members,
+                          max_member=MAX_MEMBER if max_member is None else max_member,
+                          max_total=MAX_TOTAL if max_total is None else max_total)
     try:
         return _verify_package(oap_path, require_signature, strict, known_agents)
     except (OSError, ValueError, TypeError, AttributeError, KeyError, zipfile.BadZipFile) as exc:
@@ -363,7 +347,7 @@ def _verify_package(oap_path, require_signature, strict, known_agents):
                     "signature": "manifest.json corrupt", "signature_valid": False,
                     "agent_known": None if known_agents is None else False}
 
-        if not supports_version(manifest.get("oap_version")):
+        if not isinstance(manifest.get("oap_version"), str) or not re.fullmatch(r"0\.(1|2|3)\.[0-9]+", manifest["oap_version"]):
             issues.append("unsupported oap_version")
         names = set(zf.namelist())
         if strict:
@@ -428,26 +412,15 @@ def _is_safe_path(base_dir: str, path: str) -> bool:
     return os.path.commonpath([base]) == os.path.commonpath([base, target])
 
 
-def import_actor(oap_path: str, target_dir: str, verify: bool = True) -> Dict[str, Any]:
-    """Extract a .oap into target_dir, preserving internal layout with traversal protection."""
-    os.makedirs(target_dir, exist_ok=True)
-    if verify:
-        v = verify_package(oap_path)
-        if not v["ok"]:
-            return {"ok": False, "issues": v["issues"], "extracted": False}
-    with zipfile.ZipFile(oap_path, "r") as zf:
-        for member in zf.infolist():
-            if (not _safe_member_name(member.filename.rstrip("/") if member.is_dir() else member.filename)
-                    or not _is_safe_path(target_dir, member.filename)):
-                return {
-                    "ok": False,
-                    "issues": [f"unsafe path in zip: '{member.filename}' attempts directory traversal"],
-                    "extracted": False,
-                }
-        zf.extractall(target_dir)
-    with open(os.path.join(target_dir, "manifest.json"), "r", encoding="utf-8") as f:
-        manifest = json.load(f)
-    return {"ok": True, "issues": [], "extracted": True, "manifest": manifest}
+def import_actor(oap_path: str, target_dir: str, verify: bool = True, *,
+                 known_agents: Optional[List[str]] = None,
+                 allow_untrusted: bool = False) -> Dict[str, Any]:
+    """Install a verified 0.4 package without decrypting cast assets."""
+    if not verify:
+        return {"ok": False, "issues": ["OAP 0.4 import requires verification"], "extracted": False}
+    from oap.v04 import import_actor as import_v04
+    return import_v04(oap_path, target_dir, known_agents=known_agents,
+                      allow_untrusted=allow_untrusted)
 
 
 # --------------------------------------------------------------------------- #
@@ -622,28 +595,86 @@ def _read_json(path: str) -> Dict[str, Any]:
         return json.load(f)
 
 
+def _private_key_file(path: str) -> str:
+    with open(path, encoding="utf-8") as stream:
+        value = stream.read().strip()
+    if value.startswith("{"):
+        value = json.loads(value)["_private"]
+    if not isinstance(value, str) or not value:
+        raise ValueError("private key file is empty or invalid")
+    return value
+
+
+def _public_key_file(path: str) -> str:
+    with open(path, encoding="utf-8") as stream:
+        value = stream.read().strip()
+    if value.startswith("{"):
+        document = json.loads(value)
+        if "_private" in document:
+            raise ValueError("recipient file contains a private key; share only the public identity file")
+        value = document["public_key"]
+    if not isinstance(value, str) or not value:
+        raise ValueError("recipient public key file is empty or invalid")
+    return value
+
+
+def _write_identity_files(private_path: str, public_path: str,
+                          identity: Dict[str, Any]) -> None:
+    if os.path.abspath(private_path) == os.path.abspath(public_path):
+        raise ValueError("private and public identity paths must differ")
+    created = []
+    try:
+        for path, value, mode in (
+                (private_path, identity, 0o600),
+                (public_path, {k: v for k, v in identity.items() if k != "_private"}, 0o644)):
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+            created.append(path)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                json.dump(value, stream, indent=2)
+                stream.write("\n")
+    except Exception:
+        for path in created:
+            os.unlink(path)
+        raise
+
+
 def main(argv: Optional[List[str]] = None) -> int:
-    ap = argparse.ArgumentParser(prog="oap_core", description="OAP v0.3 reference tool")
+    ap = argparse.ArgumentParser(prog="oap", description="OAP v0.4 reference tool")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("identity", help="generate a DID / keypair")
+    p = sub.add_parser("identity", help="generate an Agent signing keypair")
+    p.add_argument("--private-out", required=True, help="new private identity JSON file (mode 0600)")
+    p.add_argument("--public-out", required=True, help="new public identity JSON file")
+
+    p = sub.add_parser("recipient-key", help="generate a Director decryption keypair")
+    p.add_argument("--private-out", required=True, help="new private identity JSON file (mode 0600)")
+    p.add_argument("--public-out", required=True, help="new public identity JSON file")
 
     p = sub.add_parser("package", help="build a .oap zip")
     p.add_argument("--source", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--tier", default="portfolio", choices=list(TIER_MAX_CLEARANCE))
-    p.add_argument("--sign", default=None, help="base64 ed25519 private key")
+    p.add_argument("--sign-key-file", required=True, help="Agent identity JSON or private-key file")
+    p.add_argument("--recipient-key", action="append", default=[], help="Director public identity JSON or key file; repeatable")
 
     p = sub.add_parser("verify", help="verify a .oap zip")
     p.add_argument("--oap", required=True)
-    p.add_argument("--strict", action="store_true")
-    p.add_argument("--require-signature", action="store_true")
+    p.add_argument("--allow-untrusted", action="store_true", help="inspect valid signatures without local trust")
+    p.add_argument("--legacy", action="store_true", help="explicitly inspect a 0.1-0.3 package")
     p.add_argument("--known-agents", help="JSON file containing a list of trusted public keys")
 
     p = sub.add_parser("import", help="extract + verify a .oap into a target dir")
     p.add_argument("--oap", required=True)
     p.add_argument("--target", required=True)
-    p.add_argument("--no-verify", action="store_true")
+    p.add_argument("--known-agents", help="JSON list of locally trusted Agent public keys")
+    p.add_argument("--allow-untrusted", action="store_true", help="explicitly accept a valid but unknown Agent key")
+
+    p = sub.add_parser("migrate", help="re-sign and seal a complete legacy package as OAP 0.4")
+    p.add_argument("--oap", required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--sign-key-file", required=True)
+    p.add_argument("--recipient-key", action="append", default=[], required=True)
+    p.add_argument("--known-agents", help="optional legacy Agent trust file")
 
     p = sub.add_parser("check-call", help="check a casting call against a rider")
     p.add_argument("--manifest", required=True)
@@ -654,7 +685,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--actor", required=True)
     p.add_argument("--out", required=True, help="output dir for manifest.json")
 
-    p = sub.add_parser("studio-import", help="scaffold a studio actor from a .oap")
+    p = sub.add_parser("studio-import", help="deprecated: unavailable for encrypted OAP 0.4")
     p.add_argument("--oap", required=True)
     p.add_argument("--studio-root", required=True)
     p.add_argument("--actor", default=None)
@@ -665,7 +696,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     p = sub.add_parser("sign-agreement", help="sign or countersign a role agreement")
     p.add_argument("--agreement", required=True)
     p.add_argument("--role", required=True, choices=["agent", "director"])
-    p.add_argument("--sign", required=True, help="key file (@path), env:NAME, or base64 private key")
+    p.add_argument("--sign-key-file", required=True, help="private-key file or identity JSON")
     p.add_argument("--out", required=True)
     p.add_argument("--manifest", help="check source manifest before signing")
     p.add_argument("--call", help="check source casting call before signing")
@@ -691,14 +722,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     manifest=_read_json(args.manifest) if args.manifest else None,
                     casting_call=_read_json(args.call) if args.call else None)
             else:
-                key = args.sign
-                if key.startswith("@"):
-                    with open(key[1:], encoding="utf-8") as stream:
-                        key = stream.read().strip()
-                elif key.startswith("env:"):
-                    key = os.environ.get(key[4:])
-                    if not key:
-                        raise ValueError("signing key environment variable is empty or unset")
+                key = _private_key_file(args.sign_key_file)
                 signed = sign_agreement(_read_json(args.agreement), args.role, key,
                     manifest=_read_json(args.manifest) if args.manifest else None,
                     casting_call=_read_json(args.call) if args.call else None)
@@ -712,48 +736,63 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(json.dumps(result, indent=2))
         return 0 if result["ok"] else 1
 
-    if args.cmd == "identity":
-        ident = generate_identity()
-        print(json.dumps({k: v for k, v in ident.items() if k != "_private"}, indent=2))
-        if ident.get("_private"):
-            print("\nPRIVATE KEY (keep secret):", ident["_private"], file=sys.stderr)
-        if not HAS_CRYPTO:
-            print("note: `cryptography` not installed; used UUID DID, no signing.",
-                  file=sys.stderr)
+    if args.cmd in ("identity", "recipient-key"):
+        if args.cmd == "identity":
+            ident = generate_identity()
+        else:
+            from oap.v04 import generate_recipient_identity
+            ident = generate_recipient_identity()
+        if not ident.get("_private"):
+            ap.error("cryptography is required for OAP 0.4 identities")
+        try:
+            _write_identity_files(args.private_out, args.public_out, ident)
+        except (OSError, ValueError) as exc:
+            ap.error(str(exc))
+        print(json.dumps({"private_output": args.private_out,
+                          "public_output": args.public_out,
+                          "public_key": ident["public_key"]}, indent=2))
         return 0
 
     if args.cmd == "package":
-        sign_key = args.sign
-        if not sign_key and "OAP_PRIVATE_KEY" in os.environ:
-            sign_key = os.environ["OAP_PRIVATE_KEY"]
-        elif sign_key:
-            if sign_key.startswith("env:"):
-                var_name = sign_key[4:]
-                sign_key = os.environ.get(var_name)
-                if not sign_key:
-                    ap.error(f"environment variable '{var_name}' not set")
-            elif sign_key.startswith("@"):
-                key_path = sign_key[1:]
-                try:
-                    with open(key_path, "r", encoding="utf-8") as f:
-                        sign_key = f.read().strip()
-                except Exception as e:
-                    ap.error(f"failed to read key file '{key_path}': {e}")
-        res = package_actor(args.source, args.out, args.tier, sign_key)
+        try:
+            res = package_actor(args.source, args.out, args.tier,
+                                _private_key_file(args.sign_key_file),
+                                [_public_key_file(path) for path in args.recipient_key])
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            print(json.dumps({"ok": False, "issues": [str(exc)]}, indent=2))
+            return 1
         print(json.dumps(res, indent=2))
         return 0
 
     if args.cmd == "verify":
-        res = verify_package(args.oap, require_signature=args.require_signature,
-                             strict=args.strict, known_agents=(load_known_agents(args.known_agents)
-                             if args.known_agents else None))
+        res = verify_package(args.oap, require_signature=True, strict=True,
+                             known_agents=(load_known_agents(args.known_agents)
+                             if args.known_agents else None),
+                             allow_untrusted=args.allow_untrusted, legacy=args.legacy)
         print(json.dumps(res, indent=2))
         return 0 if res["ok"] else 1
 
     if args.cmd == "import":
-        res = import_actor(args.oap, args.target, verify=not args.no_verify)
+        res = import_actor(args.oap, args.target,
+                           known_agents=(load_known_agents(args.known_agents)
+                           if args.known_agents else None),
+                           allow_untrusted=args.allow_untrusted)
         print(json.dumps({k: res[k] for k in ("ok", "issues", "extracted")}, indent=2))
         return 0 if res["ok"] else 1
+
+    if args.cmd == "migrate":
+        try:
+            from oap.v04 import migrate_legacy_package
+            res = migrate_legacy_package(
+                args.oap, args.out, _private_key_file(args.sign_key_file),
+                [_public_key_file(path) for path in args.recipient_key],
+                known_agents=(load_known_agents(args.known_agents)
+                              if args.known_agents else None))
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            print(json.dumps({"ok": False, "issues": [str(exc)]}, indent=2))
+            return 1
+        print(json.dumps(res, indent=2))
+        return 0
 
     if args.cmd == "check-call":
         manifest = _read_json(args.manifest)
@@ -772,14 +811,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     if args.cmd == "studio-import":
-        with tempfile.TemporaryDirectory(prefix="oap-import-") as extracted:
-            imp = import_actor(args.oap, target_dir=extracted, verify=True)
-            if not imp["ok"]:
-                print(json.dumps({"ok": False, "issues": imp["issues"]}, indent=2))
-                return 1
-            res = oap_to_studio(imp["manifest"], extracted, args.studio_root, args.actor)
-        print(json.dumps(res, indent=2))
-        return 0
+        print(json.dumps({"ok": False, "issues": [
+            "studio-import cannot install encrypted OAP 0.4 assets; use a studio-owned adapter"
+        ]}, indent=2))
+        return 1
 
     ap.error("unknown command")
     return 1

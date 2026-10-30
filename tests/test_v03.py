@@ -15,7 +15,7 @@ def agreement_sources():
     manifest = oap.new_manifest('lead')
     manifest['identity']['did'] = agent['did'] + '#lead'
     manifest['agent']['public_key'] = agent['public_key']
-    call = {'oap_version': '0.3.0', 'kind': 'oap.casting_call', 'call_id': 'call_1',
+    call = {'oap_version': '0.4.0', 'kind': 'oap.casting_call', 'call_id': 'call_1',
             'director': {'did': director['did']}, 'project': {}, 'role': {}}
     agreement = oap.new_role_agreement(manifest, call, {'amount': '150.00', 'currency': 'USD'}, 'agree_1')
     return agreement, agent, director, manifest, call
@@ -26,7 +26,7 @@ def test_schemas_and_examples():
         Draft202012Validator.check_schema(json.loads(path.read_text()))
     for path in Path('examples').glob('*.json'):
         assert oap.validate_document(json.loads(path.read_text()))['ok'], path
-    for version in ('0.1.9', '0.2.99', '0.3.50'):
+    for version in ('0.1.9', '0.2.99', '0.3.50', '0.4.0'):
         manifest = oap.new_manifest('lead')
         manifest['oap_version'] = version
         manifest['extension'] = {'custom': [1, 'test']}
@@ -49,6 +49,7 @@ def test_validation_malformed(document):
 def test_audition_clearance_roundtrip(tmp_path):
     manifest = oap.new_manifest('lead')
     agent = oap.generate_identity()
+    recipient = oap.generate_recipient_identity()
     manifest['agent']['public_key'] = agent['public_key']
     manifest['assets'] = [{'file': name + '.bin', 'clearance': name}
                           for name in ('public', 'audition', 'cast')]
@@ -59,15 +60,24 @@ def test_audition_clearance_roundtrip(tmp_path):
                            ('audition', {'public.bin', 'audition.bin'}),
                            ('full', {'public.bin', 'audition.bin', 'cast.bin'})]:
         archive = tmp_path / f'{tier}.oap'
-        result = oap.package_actor(str(tmp_path), str(archive), tier, agent['_private'])
+        result = oap.package_actor(str(tmp_path), str(archive), tier, agent['_private'],
+                                   [recipient['public_key']] if tier == 'full' else [])
+        if tier == 'full':
+            expected.remove('cast.bin')
+            expected.add(next(name for name in result['included'] if name.startswith('sealed/')))
         assert set(result['included']) == expected | {'manifest.json'}
-        assert oap.verify_package(archive, strict=True, require_signature=True)['ok']
-        assert oap.import_actor(archive, str(tmp_path / tier))['ok']
+        assert oap.verify_package(archive, known_agents=[agent['public_key']])['ok']
+        assert oap.import_actor(archive, str(tmp_path / tier),
+                                known_agents=[agent['public_key']])['ok']
         with zipfile.ZipFile(archive) as zf:
             refs = json.loads(zf.read('manifest.json'))['assets']
-            assert all(ref['sha256'] for ref in refs)
+            assert all(ref['sha256'] for ref in refs if ref['file'] in expected)
+            if tier == 'full':
+                assert refs[2]['sealed']['wraps']
+    key = tmp_path / 'agent.key'
+    key.write_text(agent['_private'])
     assert main(['package', '--source', str(tmp_path), '--out', str(tmp_path / 'cli.oap'),
-                 '--tier', 'audition']) == 0
+                 '--tier', 'audition', '--sign-key-file', str(key)]) == 0
 
 
 def test_agreement_workflow_and_bindings():
@@ -128,11 +138,12 @@ def test_cli_validation_and_signing(tmp_path, capsys, monkeypatch):
     key.write_text(agent['_private'])
     assert main(['validate', '--document', str(path)]) == 0
     assert main(['sign-agreement', '--agreement', str(path), '--role', 'agent',
-                 '--sign', '@' + str(key), '--out', str(path)]) == 0
+                 '--sign-key-file', str(key), '--out', str(path)]) == 0
     assert main(['verify-agreement', '--agreement', str(path)]) == 1
-    monkeypatch.setenv('OAP_TEST_DIRECTOR_KEY', director['_private'])
+    director_key = tmp_path / 'director.key'
+    director_key.write_text(director['_private'])
     assert main(['sign-agreement', '--agreement', str(path), '--role', 'director',
-                 '--sign', 'env:OAP_TEST_DIRECTOR_KEY', '--out', str(path)]) == 0
+                 '--sign-key-file', str(director_key), '--out', str(path)]) == 0
     manifest_path, call_path = tmp_path / 'manifest.json', tmp_path / 'call.json'
     manifest_path.write_text(json.dumps(manifest)); call_path.write_text(json.dumps(call))
     assert main(['verify-agreement', '--agreement', str(path), '--manifest', str(manifest_path),

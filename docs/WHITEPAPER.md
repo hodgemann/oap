@@ -1,7 +1,7 @@
 # Open Actor Protocol (OAP)
 ### A program-agnostic standard for casting, compensating, and protecting AI actors
-**Version 0.3.0 — Draft White Paper**
-**Status:** For public release / adoption. Reference implementation: `oap/core.py`.
+**Version 0.4.0 — Draft White Paper**
+**Status:** Candidate implementation. Reference implementation: `oap/core.py` and `oap/v04.py`.
 
 ---
 
@@ -22,12 +22,12 @@ OAP is program-agnostic: any studio or builder can import `oap` and speak the st
 - Program-agnostic: any builder can `import oap` and speak the protocol.
 - Accommodate the full trust spectrum (open/CC → friends → strangers → zero-trust).
 - Protect actor IP (reference sheets, voice anchors) and Director IP (prompts, sets).
-- Pragmatic v0.3: shippable on GitHub/HuggingFace with no custom infrastructure.
+- Pragmatic v0.4: recipient-encrypted handover without mandatory network infrastructure.
 - No drastic changes required for a host studio to comply.
 
-## 3. Non-Goals (v0.3)
+## 3. Non-Goals (v0.4)
 - No blockchain, no custom P2P overlay network, no mandatory cloud.
-- No enforced payment rails (rates are declarative; settlement is out of scope for v0.3).
+- No enforced payment rails (rates are declarative; settlement is out of scope for v0.4).
 - No DRM hard-guarantees (see §14, honest limits).
 - Not a rendering protocol: OAP moves identity + contracts; the compliant program renders.
 
@@ -51,19 +51,18 @@ actor.oap
 │   ├── headshot.png          (watermarked, mid-res)
 │   ├── demo_reel.mp4         (watermarked)
 │   └── voice_demo.mp3        (generic line, NOT the anchor)
-├── identity/              ← CAST clearance: delivered only on handover
-│   ├── reference_sheet.png
-│   ├── voice_anchor.wav      (locked master anchor)
-│   └── character_lora.safetensors   (optional)
-└── signatures/            ← optional auxiliary files (not separately verified)
+└── sealed/                ← CAST clearance: encrypted files in a full package
+    └── <sha256-of-logical-path>.bin
 
 # The Agent signature is embedded in manifest.json, not a detached file.
 ```
 
 **Tiered download:** the *public* `.oap` (manifest + `portfolio/`) lives on GitHub/HuggingFace.
-The *full* `.oap` (adds `identity/`) is delivered only after the Agent approves a request.
-The manifest lists **every** asset with its SHA-256 and clearance up front, so a receiving
-program can verify the full package against the public hashes (the "Linux ISO" method).
+The *full* `.oap` includes encrypted cast assets for named Director recipient keys.
+Each tier has its own Agent-signed manifest and exact member inventory. The
+public manifest does not expose raw hashes of omitted cast assets. The receiver
+checks the full manifest signature, local Agent trust, and ciphertext hashes
+before using its recipient key.
 
 ## 6. Clearance Tiers
 Every asset declares a clearance. A package includes assets at or below its tier.
@@ -84,14 +83,15 @@ The manifest declares a protection tier describing how `cast`-clearance assets a
 | Tier | Name | Mechanism | Stops | Trust assumption |
 |---|---|---|---|---|
 | **0** | Open | Plain files on disk | Nothing | Friends / CC-licensed actors |
-| **1** | Encrypted at rest | Assets encrypted; program decrypts in memory; no plaintext on disk | Casual copying | Program-held key (game-asset model) |
+| **1** | Recipient-encrypted handover | Cast assets encrypted; named recipient decrypts in memory | Casual copying | Director holds a separate X25519 key |
 | **2** | Key delivery + revocation | Director's program requests a short-lived, use-scoped key from the Actor's Agent; Agent can revoke/audit | Casual theft + adds kill-switch & accountability | Still local; relationship enforced |
 | **3** | Render proxy | Assets never delivered; rendering happens on Actor infra or a mutually-trusted service; only outputs return | Essentially everything | Needs infra; raises prompt-privacy tension |
 | **4** | Enclave (TEE) | Assets decryptable only inside a hardware enclave | Strongest local guarantee | Complex, hardware-dependent (future) |
 
-**The reference packager writes plain files (Tier 0). Tier 1 encryption and Tier 2
-key delivery are studio responsibilities; declaring a tier does not implement it.
-Tiers 3–4 are reserved for later.**
+**The reference packager writes plain public and audition assets (Tier 0) and
+recipient-encrypted cast assets in full packages (Tier 1). Tier 2 key
+delivery/revocation and Tiers 3–4 remain future work. Declaring a tier in an
+untrusted manifest does not implement it; verify the signed package.**
 
 ### 7.1 The CLEAN ROOM rule
 Any render or asset crossing the protocol boundary MUST be sanitized before
@@ -299,9 +299,10 @@ capability-card discipline: declare what you need, refuse cleanly if unsupported
 The `anchor` (master) is `cast` clearance; the `demo` is public and is **not** the cloning source.
 
 ### 8.3 Generic assets and personality
-`assets` is an optional array of `{file, clearance, sha256, role}` references.
-Like the fixed visual/voice slots, these are hashed before signing, packed by
-clearance, and verified when present. Initial role conventions are `personality`,
+`assets` is an optional array of asset references. In 0.4, included public
+and audition assets carry SHA-256 and byte size; included cast assets carry
+sealed ciphertext metadata and recipient envelopes. Omitted cast assets carry
+no raw hash. Initial role conventions are `personality`,
 `voice_take`, `outfit_sheet`, and `turnaround`; role strings are extensible.
 Personality is an asset with role `personality`, normally at `cast` clearance;
 there is no separate `identity.personality` slot. Extensions are signed but are
@@ -309,9 +310,8 @@ not traversed for asset references. Package-time extras use this same array.
 
 Paths MUST be relative POSIX paths with no absolute roots, empty/dot/parent
 components, backslashes, NULs, or drive prefixes. `manifest.json` and the
-`signatures/` namespace are reserved. Duplicate references may share a path but
-MUST have the same clearance; the packager writes each file once. Unknown
-clearances are rejected when packaging.
+`sealed/` namespace are reserved. Duplicate asset reference paths are rejected,
+even if their clearances agree. Unknown clearances are rejected.
 
 ### 8.4 Look and height
 `visual.visual_contract` is the actor's canonical LOOK, not a production's
@@ -346,31 +346,27 @@ characters outside the URI unreserved set in the actor-id fragment. One Agent
 can represent many actors without issuing each actor a key. Attestations name
 the complete actor identifier, including its fragment. This is an OAP identifier
 convention, not a claim of registration as a W3C DID method. UUID identifiers
-remain available for unsigned actors. Package signatures are verified against
+remain available in historical packages, but new 0.4 packages require a
+signature. Package signatures are verified against
 `agent.public_key`: they establish Agent authorship, not an independently
 verified actor-to-Agent delegation.
 
 ### 8.7 Verification and local trust
-`verify_package(path, require_signature=False, strict=False, known_agents=None)`
-checks hashes of present referenced assets and any supplied signature. Unsigned
-packages remain acceptable by default; `require_signature=True` rejects them.
-Strict mode rejects unlisted files outside `signatures/`, unsafe ZIP member or
-asset paths, and duplicate member names. Safe directory entries are permitted.
-`signatures/` files are permitted but not authenticated separately; the Agent
-signature lives in the manifest. Import always checks path safety, even when
-hash/signature verification is disabled.
-
-Absent assets are permitted because portfolio packages intentionally omit
-higher-clearance files. Therefore `ok` is an integrity verdict for the included
-assets, not proof of a complete full handover. Strict mode does not change that.
+Normal 0.4 `verify_package` requires a valid Agent signature, an exact signed
+member inventory, hashes and sizes of every included file, safe unique ordinary
+ZIP members, and bounded archive sizes. It rejects unsigned packages and old
+formats. Explicit `legacy=True` is available for historical inspection and
+migration. A portfolio or audition package omits higher-clearance assets; its
+signed bundle tier makes that omission explicit.
 
 A local `known_agents.json` convention is a JSON array of trusted Agent public
 key strings. `load_known_agents(path)` reads it; the CLI accepts
 `--known-agents FILE`. No file is loaded implicitly and imports never enroll
 keys automatically. `agent_known` is null without a supplied trust list, false
 when the key is absent, and true when present. Membership is independent of
-`signature_valid` and does not change `ok`. A consumer requiring trust MUST
-require both a valid signature and `agent_known == true`. Studios should record
+`signature_valid`, but normal `ok` requires both valid integrity and a trusted
+key. Explicit `allow_untrusted=True` is for inspection or a manual trust
+decision. Studios should record
 the Agent key for each imported actor and surface key changes for review;
 rotation, actor binding history, and Indexer trust distribution remain local
 policy or future work.
@@ -379,13 +375,31 @@ policy or future work.
 Readers MUST accept patch versions of each major/minor they support and ignore
 unknown object keys, while preserving them when signing or repackaging. Ignoring
 unknown fields does not authorize ignoring unsupported required capabilities.
-The 0.3 reference reader explicitly supports 0.1.x, 0.2.x, and 0.3.x. Other major/minor
-versions are rejected; future cross-minor support requires an explicit decision.
-`supports_version(version)` exposes that policy. Legacy studios may reject
-0.3 manifests and must update their version gate; additive fields alone cannot
-make an existing reader accept a new version. Omitted 0.2 fields remain valid
-when reading 0.1 packages. Package verification checks integrity; explicit `validate_document` checks
-manifest schema conformance without changing the legacy verification policy.
+The normal 0.4 reader supports 0.4.x. Other major/minor versions are rejected
+unless the caller explicitly selects legacy inspection for 0.1.x–0.3.x.
+`supports_version(version)` exposes the normal policy. A complete old actor
+package can be migrated only after verifying the old signature and re-signing
+the new format with the Agent key. Existing role agreements are historical
+records and require both parties to sign a new 0.4 agreement.
+
+### 8.9 Signed, encrypted 0.4 bundles
+
+A 0.4 actor manifest MUST contain a signed issued_at timestamp and a bundle
+object with tier and members. The members list MUST exactly match all non-manifest
+ZIP file names. All names MUST be safe, unique, ordinary files. The signatures
+namespace has no exception. A full bundle MUST contain each cast asset as an
+authenticated sealed file and MUST name at least one recipient for each. A
+portfolio or audition bundle MUST omit cast bytes and raw cast hashes.
+
+The Agent signs the ASCII bytes "OAP actor manifest v0.4", a NUL byte, and
+sorted compact ASCII-escaped JSON of the manifest with only the top-level
+signature object removed. The recipient key is separate from the Agent signing
+key. OAP wraps a fresh random key per cast asset to each recipient using
+RFC 9180 HPKE with X25519, HKDF-SHA256, and AES-256-GCM. The sealed asset
+uses libsodium secretstream XChaCha20-Poly1305 with authenticated records
+and a required final record. The signed manifest binds its ciphertext hash,
+recipient envelopes, logical asset path, and archive membership. See
+[0.4 release notes](RELEASE_NOTES_0.4.md) for the byte layout and APIs.
 
 ## 9. The Rider
 Boundary vocabulary, anchored on four content categories and extended with
@@ -446,7 +460,7 @@ A Director publishes a `oap.casting_call` document:
 outfit sets `requires_wardrobe_change`; if `wardrobe_is_identity` is `true`, a wardrobe change
 requires explicit Agent approval in the role agreement.
 
-### 10.1 Role agreements (0.3)
+### 10.1 Role agreements (0.3 and 0.4)
 
 `oap.role_agreement` records the actor DID, Agent and Director ed25519 DIDs,
 `agreement_id`, `call_id`, SHA-256 hashes of the complete source manifest and call,
@@ -465,15 +479,17 @@ Verification does not establish signer identity trust,
 approve rider exceptions, enforce terms, or perform payment. Applications must
 confirm the parties and any amendments before signing. Source hashes use sorted,
 compact, ASCII-escaped Python JSON encoded in UTF-8, including source signatures;
-agreement signing prepends the ASCII bytes `OAP role agreement v0.3` and one
+agreement signing prepends the ASCII bytes `OAP role agreement v0.3` for 0.3
+records or `OAP role agreement v0.4` for 0.4 records, and one
 NUL byte to that encoding after removing `signatures` (domain separation). Nonfinite
 numbers are rejected. This is the existing OAP convention, not RFC 8785.
-See [0.3 release notes](RELEASE_NOTES_0.3.md) for executable examples.
+See [0.3 release notes](RELEASE_NOTES_0.3.md) for historical examples and
+[0.4 release notes](RELEASE_NOTES_0.4.md) for the new package handover.
 
 ## 11. Compensation
 v0.2 rates are declarative and simple (`audition`, `per_scene`, `per_production`, `currency`,
 `notes`) — enough for an Agent to auto-negotiate, loose enough to ship. Settlement rails are
-out of scope for v0.3.
+out of scope for v0.4.
 
 ## 12. Transport & Distribution
 - **v0.2 — Side-channel handoff.** Public `.oap` on GitHub/HuggingFace. The Agent packages
@@ -510,19 +526,19 @@ makes no assumptions about `actors/`, `refs/`, record identifiers, or overwrite
 policy. Adapters translate between the standard manifest and the studio's own
 records and asset directories.
 
-The legacy `studio_export_actor`, `oap_to_studio`, `studio-export`, and
-`studio-import` interfaces are deprecated generic examples retained for API
-compatibility in 0.2. Production integrations should use studio-owned adapters. The importer refuses to overwrite `actor.json`, keeps
-distinct WAV filenames, and cleans temporary extraction directories. Removal
-is planned for a later release.
+The legacy `studio_export_actor`, `oap_to_studio`, and `studio-export`
+interfaces remain deprecated examples. The `studio-import` CLI refuses 0.4
+packages because a generic bridge cannot safely install encrypted cast assets.
+Production integrations must use studio-owned adapters and the verified,
+in-memory decryption API.
 
 ## 16. Reference Implementation
 The `oap` package provides identity generation, manifest building, tiered ZIP
 packaging with SHA-256 filling, signing, verification, safe extraction, rider
 checks, explicit local trust lookup, and clean-room PNG/WAV conversion.
-`cryptography` is a declared runtime dependency; if unavailable, identity
-creation falls back to UUID, signing raises an error, and signed packages cannot
-verify. Optional PNG conversion uses Pillow via the `images` extra.
+`cryptography>=47` and `PyNaCl>=1.6.2` are runtime dependencies for 0.4
+signing, HPKE envelopes, and authenticated file streams. Optional PNG
+conversion uses Pillow via the `images` extra.
 
 ### 16.1 Formal validation (0.3)
 
@@ -532,7 +548,8 @@ casting calls, and role agreements. `validate_document` and `oap validate
 known object/array field types, asset clearances/hashes, and agreement fields. They report
 JSON paths and preserve unknown extension keys. Validation is explicit and does
 not change legacy package verification or prove trust, integrity, or rider approval.
-Actor/call schemas accept versions 0.1.x–0.3.x; agreements begin at 0.3.x.
+Actor/call schemas accept versions 0.1.x–0.4.x for document inspection;
+agreements begin at 0.3.x. Normal package verification requires 0.4.x.
 
 ## 17. Roadmap
 - **v0.2** — Generic assets, structured look and height, voice provenance,
@@ -540,6 +557,8 @@ Actor/call schemas accept versions 0.1.x–0.3.x; agreements begin at 0.3.x.
   clean-room asset helpers, and explicit compatibility policy.
 - **v0.3** — Offline formal validation, audition-clearance packaging, and
   bilateral signed role agreements.
-- **Future** — Magic Wormhole transport, Tier 1 encryption, Tier 2 key
+- **v0.4** — Recipient-encrypted cast handover, signed exact inventories,
+  fail-closed trust and import, and explicit legacy migration.
+- **Future** — Magic Wormhole transport, Tier 2 key
   delivery/revocation, automated audition delivery, attestation schema, Tier 3 render
   proxy, Tier 4 enclave, watermark integration, settlement, and live reputation.

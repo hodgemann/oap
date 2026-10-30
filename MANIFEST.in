@@ -4,3 +4,4 @@ include docs/WHITEPAPER.md
 include docs/RELEASE_NOTES_*.md
 include docs/future_improvements.md
 recursive-include examples *.json
+recursive-include tests/vectors *.json

@@ -6,7 +6,7 @@ The **Open Actor Protocol (OAP)** lets AI actor agents audition for roles in AI 
 shorts made by Directors on any platform. It is program-agnostic: any studio or builder can
 `import oap` and speak the standard.
 
-**Version:** 0.3.1 (reference implementation + spec)
+**Version:** 0.4.0 (reference implementation + spec)
 
 ---
 
@@ -29,29 +29,44 @@ pip install -e .
 pip install -r requirements.txt
 ```
 
-`cryptography` is required for ed25519 DIDs and manifest signing. Without it, OAP still
-works but falls back to UUID identities and skips signing.
+`cryptography>=47` and `PyNaCl>=1.6.2` are required for v0.4 signing,
+recipient encryption, and authenticated file streams.
 
 ## Quick start
 
 ```bash
-# Generate a DID / keypair
-oap identity
+# Generate an Agent signing key and Director decryption key
+oap identity --private-out agent.private.json --public-out agent.public.json
+oap recipient-key --private-out director.private.json --public-out director.public.json
 
-# Package an actor into a public portfolio .oap
-oap package --source ./actor_src --out ./actor.oap --tier portfolio
+# Package a signed public portfolio
+oap package --source ./actor_src --out ./actor-public.oap --tier portfolio --sign-key-file agent.private.json
 
-# Verify a package's hashes and signature
-oap verify --oap ./actor.oap --strict --require-signature
+# Encrypt cast assets for a Director and sign the full package
+oap package --source ./actor_src --out ./actor-full.oap --tier full --sign-key-file agent.private.json --recipient-key director.public.json
 
-# Import (extract + verify) a package
-oap import --oap ./actor.oap --target ./actor_installed
+# Verify and import with a trusted Agent key list
+oap verify --oap ./actor-full.oap --known-agents ./known_agents.json
+oap import --oap ./actor-full.oap --target ./actor_installed --known-agents ./known_agents.json
 
 # Check a casting call against an actor's rider
 oap check-call --manifest ./manifest.json --call ./casting_call.json
 ```
 
 Without installing, run the same commands via `python oap/core.py <subcommand>`.
+Create `actor_src/manifest.json` with `new_manifest()` and set its
+`agent.public_key` to the Agent identity's public key before packaging.
+`known_agents.json` is a JSON array of Agent public-key strings selected by the
+receiving studio.
+
+## New in 0.4
+
+Full packages seal cast assets for one or more Directors using separate X25519
+recipient keys. A signed, exact file inventory and strict archive limits protect
+verification and import. Imported packages retain ciphertext; programs use
+`open_asset_buffer()` to decrypt an asset in memory after signature and local
+Agent trust checks. Old 0.1–0.3 packages require explicit legacy inspection
+and re-signing through `oap migrate`. See [the 0.4 release notes](docs/RELEASE_NOTES_0.4.md).
 
 ## The `.oap` package
 
@@ -59,13 +74,13 @@ Without installing, run the same commands via `python oap/core.py <subcommand>`.
 actor.oap (zip)
 ├── manifest.json      # the OAP manifest
 ├── portfolio/         # PUBLIC clearance: watermarked headshot, demo reel, voice demo
-├── identity/          # CAST clearance: raw reference sheets, locked voice anchor, LoRA
-└── signatures/        # optional auxiliary files; signature lives in manifest.json
+└── sealed/            # CAST clearance: authenticated ciphertext for named Directors
 ```
 
-The manifest lists every asset with its SHA-256 and clearance. The public `.oap` ships
-anywhere (GitHub, HuggingFace); the full `.oap` (with `identity/`) is handed over only
-after the Agent approves, and the receiver verifies it against the public hashes.
+The v0.4 manifest signs the exact members shipped in each package. Public and
+audition assets carry SHA-256 hashes. A full package contains authenticated
+ciphertext for cast assets, with its hash and recipient envelopes in the
+signed manifest. Public packages omit cast hashes and cast bytes.
 
 ## New in 0.3
 
@@ -73,7 +88,7 @@ Validate manifests/casting calls with `oap validate --document FILE`, package
 public plus audition assets using `oap package --tier audition`, and record
 bilateral Agent/Director signatures with `oap sign-agreement` and
 `oap verify-agreement`. Schemas ship with the library; unknown extension keys
-remain permitted. New readers accept 0.1.x, 0.2.x, and 0.3.x.
+remain permitted. These features were introduced in the 0.3 format.
 See [the 0.3 release notes](docs/RELEASE_NOTES_0.3.md) for the agreement workflow,
 compatibility, and limits.
 
@@ -82,7 +97,7 @@ compatibility, and limits.
 Generic `assets` use the same clearance, hashes, packaging, and verification as
 visual sheets and voice references. Personality is an asset with role
 `personality`. Structured look/height and voice provenance fields are optional;
-0.3 readers accept 0.1.x, 0.2.x, and 0.3.x packages and preserve unknown keys.
+Legacy inspection accepts 0.1.x, 0.2.x, and 0.3.x packages and preserves unknown keys.
 
 ```python
 from oap import clean_asset, load_known_agents, verify_package
@@ -90,16 +105,13 @@ from oap import clean_asset, load_known_agents, verify_package
 # Install PNG support with: pip install -e '.[images]'
 # Clean before packaging/signing; PNG pixels and PCM WAV samples are preserved.
 clean_asset("raw.png", "identity/reference_sheet.png")
-result = verify_package(
-    "actor.oap", strict=True, require_signature=True,
-    known_agents=load_known_agents("known_agents.json"),
-)
-trusted = result["ok"] and result["agent_known"] is True
+result = verify_package("actor-full.oap", known_agents=load_known_agents("known_agents.json"))
+trusted = result["ok"]
 ```
 
 The trust file is a JSON array of Agent public keys. Without an explicit list,
-`agent_known` is null. Strict verification rejects stray files, unsafe names,
-and duplicate members; it permits assets omitted for a lower-clearance tier.
+`agent_known` is null and normal verification fails closed. Strict verification
+rejects stray files, unsafe names, and duplicate members.
 The legacy studio bridge is deprecated; each studio owns its adapter.
 See [the 0.2 release notes](docs/RELEASE_NOTES_0.2.md) for migration details.
 
@@ -108,13 +120,14 @@ See [the 0.2 release notes](docs/RELEASE_NOTES_0.2.md) for migration details.
 | Tier | Name | Mechanism | Trust assumption |
 |---|---|---|---|
 | 0 | Open | Plain files | Friends / CC-licensed |
-| 1 | Encrypted at rest | Program decrypts in memory | Program-held key |
+| 1 | Recipient-encrypted handover | Program decrypts in memory | Named Director key |
 | 2 | Key delivery | Agent issues short-lived revocable keys | Relationship enforced |
 | 3 | Render proxy | Assets never delivered; remote render | Infra required |
 | 4 | Enclave (TEE) | Hardware-enclave decryption | Future |
 
-The reference packager writes Tier 0 plain files. Encryption and higher-tier
-mechanisms remain studio responsibilities. See [the standard](docs/WHITEPAPER.md).
+The v0.4 full packager encrypts cast assets for named recipients. Tier 2
+revocation and higher-tier mechanisms remain future work. See
+[the standard](docs/WHITEPAPER.md).
 
 ## Example actors
 
@@ -127,13 +140,12 @@ library, and OAP never fetches or trusts them automatically. Verify one
 offline before importing:
 
 ```bash
-oap verify --oap animal_pig.oap --strict --require-signature
+oap verify --oap animal_pig.oap --legacy
 ```
 
 A valid signature proves which key signed the package, not that the key is
-trusted. Compare the package hash with the collection's `index.json` and decide
-signer trust yourself. Pin a collection release (currently v1.0.1) rather than
-its `main` branch.
+trusted. These examples are older-format packages; migrate and re-sign before
+normal v0.4 import. Compare package hashes with the collection `index.json`.
 
 ## Related: Open Prop Protocol
 
@@ -157,7 +169,7 @@ oap/
 │   └── core.py          # the reference implementation
 ├── examples/            # sample manifest + casting call
 └── docs/
-    └── WHITEPAPER.md    # the v0.2 spec
+    └── WHITEPAPER.md    # the current spec
 ```
 
 ## License
@@ -170,7 +182,9 @@ MIT — see [LICENSE](LICENSE).
   local Agent trust, clean-room helpers, and 0.1/0.2 read compatibility.
 - **v0.3** — offline JSON Schema validation, audition-clearance packaging, and
   countersigned role agreements.
-- **Future** — encrypted delivery, Magic Wormhole transport, key revocation, attestation schema.
+- **v0.4** — recipient-encrypted cast handover, signed exact ZIP inventories,
+  fail-closed trust and import, and explicit migration.
+- **Future** — Magic Wormhole transport, key revocation, attestation schema.
 - **Later** — Tier 3 render proxy, Tier 4 enclave, provenance watermarking, settlement.
 
 ## Acknowledgments

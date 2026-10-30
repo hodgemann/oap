@@ -8,6 +8,10 @@
 > multimodal assets. Version 0.3 adds offline formal validation, audition-clearance
 > packaging, and bilateral role agreements. Encryption and attestations are
 > deferred. Automatic rendering, watermarking, and expiration are not implemented.
+> The 0.4 candidate adds recipient-encrypted cast handover, exact signed
+> inventories, and fail-closed import/trust rules; see
+> [0.4 release notes](docs/RELEASE_NOTES_0.4.md). Attestations and
+> revocation remain future work.
 > See [the release notes](docs/RELEASE_NOTES_0.3.md)
 > for the actual scope and limits; the phase labels below are proposals, not
 > shipped capability claims.

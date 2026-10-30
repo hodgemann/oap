@@ -12,8 +12,13 @@ from oap.core import main
 
 def bundle(tmp_path, manifest=None, entries=None):
     path = tmp_path / 'actor.oap'
+    if manifest is None:
+        manifest = oap.new_manifest('lead')
+        manifest['oap_version'] = '0.2.0'
+        manifest.pop('issued_at')
+        manifest.pop('bundle')
     with zipfile.ZipFile(path, 'w') as archive:
-        archive.writestr('manifest.json', json.dumps(manifest or oap.new_manifest('lead')))
+        archive.writestr('manifest.json', json.dumps(manifest))
         for name, data in (entries or {}).items():
             archive.writestr(name, data)
     return path
@@ -21,6 +26,7 @@ def bundle(tmp_path, manifest=None, entries=None):
 
 def test_generic_assets_roundtrip(tmp_path):
     identity = oap.generate_identity()
+    recipient = oap.generate_recipient_identity()
     manifest = oap.new_manifest('lead')
     manifest['agent']['public_key'] = identity['public_key']
     manifest['identity']['did'] = identity['did'] + '#lead'
@@ -33,19 +39,23 @@ def test_generic_assets_roundtrip(tmp_path):
         (tmp_path / name).write_bytes(name.encode())
     (tmp_path / 'manifest.json').write_text(json.dumps(manifest))
     path = tmp_path / 'full.oap'
-    oap.package_actor(str(tmp_path), str(path), 'full', identity['_private'])
+    oap.package_actor(str(tmp_path), str(path), 'full', identity['_private'],
+                      [recipient['public_key']])
     result = oap.verify_package(path, require_signature=True, strict=True,
                                 known_agents=[identity['public_key']])
     assert result['ok'] and result['agent_known'] and result['checked'] == 2
     assert oap.verify_package(path, known_agents=[])['agent_known'] is False
     assert oap.verify_package(path)['agent_known'] is None
-    assert oap.import_actor(path, str(tmp_path / 'installed'))['ok']
-    assert (tmp_path / 'installed/personality.md').read_bytes() == b'personality.md'
+    assert oap.import_actor(path, str(tmp_path / 'installed'),
+                            known_agents=[identity['public_key']])['ok']
+    assert not (tmp_path / 'installed/personality.md').exists()
+    assert oap.open_asset_buffer(path, 'personality.md', recipient['_private'],
+                                 known_agents=[identity['public_key']]) == b'personality.md'
     oap.package_actor(str(tmp_path), str(path), 'portfolio', identity['_private'])
-    assert oap.verify_package(path, strict=True)['checked'] == 1
+    assert oap.verify_package(path, known_agents=[identity['public_key']])['checked'] == 1
     with zipfile.ZipFile(path) as archive:
         assert 'personality.md' not in archive.namelist()
-        assert json.loads(archive.read('manifest.json'))['assets'][0]['sha256']
+        assert json.loads(archive.read('manifest.json'))['assets'][0]['sha256'] is None
 
 
 def test_generic_asset_tamper(tmp_path):
@@ -64,16 +74,17 @@ def test_strict_unsafe_and_import(tmp_path, name):
 
 def test_strict_signature_and_extras(tmp_path, capsys):
     path = bundle(tmp_path, entries={'stray.txt': b'x', 'signatures/note': b'ok'})
-    assert oap.verify_package(path)['ok']
-    assert not oap.verify_package(path, require_signature=True)['ok']
-    assert not oap.verify_package(path, strict=True)['ok']
-    assert main(['verify', '--oap', str(path), '--strict', '--require-signature']) == 1
+    assert not oap.verify_package(path)['ok']
+    assert oap.verify_package(path, legacy=True)['ok']
+    assert not oap.verify_package(path, legacy=True, require_signature=True)['ok']
+    assert not oap.verify_package(path, legacy=True, strict=True)['ok']
+    assert main(['verify', '--oap', str(path), '--legacy']) == 1
     assert 'signature required' in capsys.readouterr().out
     path = bundle(tmp_path, entries={'signatures/note': b'ok'})
-    assert oap.verify_package(path, strict=True)['ok']
+    assert oap.verify_package(path, legacy=True, strict=True)['ok']
     with pytest.warns(UserWarning), zipfile.ZipFile(path, 'a') as archive:
         archive.writestr('manifest.json', json.dumps(oap.new_manifest('other')))
-    assert not oap.verify_package(path, strict=True)['ok']
+    assert not oap.verify_package(path, legacy=True, strict=True)['ok']
 
 
 @pytest.mark.parametrize('name', ['../outside', '/outside', 'C:outside', 'a\\outside', 'manifest.json'])
@@ -96,6 +107,9 @@ def test_trust_store(tmp_path):
 
 def test_new_fields_signed_roundtrip(tmp_path):
     manifest = oap.new_manifest('lead')
+    manifest['oap_version'] = '0.2.0'
+    manifest.pop('issued_at')
+    manifest.pop('bundle')
     manifest['visual']['height'] = {'cm': 185, 'ft_in': '6\'1"', 'source': 'director'}
     manifest['visual']['contract'] = {'default_sheet': 'ref.png', 'sheets': {
         'ref.png': {'views': ['front'], 'identity': 'hazel eyes', 'hair': 'bob',
@@ -108,7 +122,7 @@ def test_new_fields_signed_roundtrip(tmp_path):
     manifest['agent']['public_key'] = identity['public_key']
     oap.sign_manifest(manifest, identity['_private'])
     path = bundle(tmp_path, manifest)
-    assert oap.verify_package(path, require_signature=True)['ok']
+    assert oap.verify_package(path, require_signature=True, legacy=True)['ok']
     manifest['visual']['height']['cm'] = 186
     assert not oap.verify_signature(manifest)[0]
 
@@ -174,15 +188,16 @@ def test_deprecated_bridge_preserves_files_and_refuses_overwrite(tmp_path):
     assert open(result['actor_json']).read() == before
 
 
-@pytest.mark.parametrize('version,accepted', [('0.1.0', True), ('0.1.99', True),
-    ('0.2.0', True), ('0.2.100', True), ('0.3.0', True), ('0.3.100', True), ('0.4.0', False), ('1.0.0', False),
+@pytest.mark.parametrize('version,accepted', [('0.1.0', False), ('0.1.99', False),
+    ('0.2.0', False), ('0.2.100', False), ('0.3.0', False), ('0.3.100', False), ('0.4.0', True), ('1.0.0', False),
     ('0.2', False), (None, False)])
 def test_version_policy(tmp_path, version, accepted):
     manifest = oap.new_manifest('lead')
     manifest['oap_version'] = version
     manifest['unknown_future_key'] = {'preserve': True}
     assert oap.supports_version(version) is accepted
-    assert oap.verify_package(bundle(tmp_path, manifest))['ok'] is accepted
+    # A manifest alone is never a valid signed 0.4 package.
+    assert not oap.verify_package(bundle(tmp_path, manifest))['ok']
 
 
 def test_malformed_packages_fail_verification(tmp_path):
@@ -208,19 +223,19 @@ def test_palette_transparency_survives_cleaning(tmp_path):
 
 def test_pack_deduplicates_and_rejects_conflicting_clearance(tmp_path):
     manifest = oap.new_manifest('lead')
+    identity = oap.generate_identity()
+    manifest['agent']['public_key'] = identity['public_key']
     manifest['visual']['sheets'] = [{'file': 'ref.png', 'clearance': 'cast'}]
     manifest['assets'] = [{'file': 'ref.png', 'clearance': 'cast', 'role': 'turnaround'}]
     (tmp_path / 'ref.png').write_bytes(b'ref')
     (tmp_path / 'manifest.json').write_text(json.dumps(manifest))
     path = tmp_path / 'out.oap'
-    oap.package_actor(str(tmp_path), str(path), 'full')
-    assert oap.verify_package(path, strict=True)['ok']
-    with zipfile.ZipFile(path) as archive:
-        assert archive.namelist().count('ref.png') == 1
+    with pytest.raises(ValueError, match='duplicate asset reference'):
+        oap.package_actor(str(tmp_path), str(path), 'full', identity['_private'])
     manifest['assets'][0]['clearance'] = 'public'
     (tmp_path / 'manifest.json').write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match='conflicting clearances'):
-        oap.package_actor(str(tmp_path), str(path))
+    with pytest.raises(ValueError, match='duplicate asset reference'):
+        oap.package_actor(str(tmp_path), str(path), sign_key=identity['_private'])
 
 
 def test_pack_clears_stale_signature(tmp_path):
@@ -230,29 +245,17 @@ def test_pack_clears_stale_signature(tmp_path):
     oap.sign_manifest(manifest, identity['_private'])
     (tmp_path / 'manifest.json').write_text(json.dumps(manifest))
     path = tmp_path / 'out.oap'
-    oap.package_actor(str(tmp_path), str(path))
-    assert oap.verify_package(path)['ok']
-    assert not oap.verify_package(path)['signature_valid']
+    oap.package_actor(str(tmp_path), str(path), sign_key=identity['_private'])
+    assert oap.verify_package(path, known_agents=[identity['public_key']])['ok']
+    with zipfile.ZipFile(path) as archive:
+        assert json.loads(archive.read('manifest.json'))['signature']['value'] != manifest['signature']['value']
 
 
-def test_studio_cli_removes_temporary_extraction(tmp_path, monkeypatch, capsys):
-    import oap.core as core
+def test_studio_cli_refuses_untrusted_legacy_package(tmp_path, capsys):
     source = bundle(tmp_path)
-    extraction_paths = []
-    actual_import = core.import_actor
-
-    def record_import(path, target_dir, verify=True):
-        extraction_paths.append(target_dir)
-        return actual_import(path, target_dir, verify)
-
-    monkeypatch.setattr(core, 'import_actor', record_import)
-    with pytest.warns(DeprecationWarning):
-        assert main(['studio-import', '--oap', str(source),
-                     '--studio-root', str(tmp_path / 'studio')]) == 0
-    from pathlib import Path
-    assert extraction_paths and not Path(extraction_paths[0]).exists()
-    assert not (tmp_path / 'studio/.oap_tmp').exists()
-    assert json.loads(capsys.readouterr().out)['actor_json']
+    assert main(['studio-import', '--oap', str(source),
+                 '--studio-root', str(tmp_path / 'studio')]) == 1
+    assert not (tmp_path / 'studio/actors').exists()
 
 
 def test_cli_trust_store_and_signed_package(tmp_path, capsys):
@@ -263,6 +266,6 @@ def test_cli_trust_store_and_signed_package(tmp_path, capsys):
     path = bundle(tmp_path, manifest)
     trusted = tmp_path / 'known_agents.json'
     trusted.write_text(json.dumps([identity['public_key']]))
-    assert main(['verify', '--oap', str(path), '--strict', '--require-signature',
+    assert main(['verify', '--oap', str(path),
                  '--known-agents', str(trusted)]) == 0
-    assert json.loads(capsys.readouterr().out)['agent_known'] is True
+    assert json.loads(capsys.readouterr().out)['ok'] is True

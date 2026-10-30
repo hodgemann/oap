@@ -29,6 +29,7 @@ from .core import (
 from .assets import clean_asset
 from .validation import validate_document
 from .agreements import document_sha256, new_role_agreement, sign_agreement, verify_agreement
+from .v04 import generate_recipient_identity, open_asset_buffer, migrate_legacy_package
 
 __version__ = OAP_VERSION
 
@@ -58,4 +59,7 @@ __all__ = [
     "new_role_agreement",
     "sign_agreement",
     "verify_agreement",
+    "generate_recipient_identity",
+    "open_asset_buffer",
+    "migrate_legacy_package",
 ]
