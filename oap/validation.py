@@ -10,6 +10,15 @@ SCHEMAS = {
     'oap.actor.manifest': 'oap.actor.manifest.schema.json',
     'oap.casting_call': 'oap.casting_call.schema.json',
     'oap.role_agreement': 'oap.role_agreement.schema.json',
+    'oap.revocation_entry': 'oap.revocation_entry.schema.json',
+    'oap.revocation_list': 'oap.revocation_list.schema.json',
+    'oap.attestation': 'oap.attestation.schema.json',
+}
+# Trust documents identify themselves by a version key rather than `kind`.
+VERSION_KEYS = {
+    'oap_revocation_entry_version': 'oap.revocation_entry',
+    'oap_revocation_list_version': 'oap.revocation_list',
+    'oap_attestation_version': 'oap.attestation',
 }
 
 
@@ -31,6 +40,8 @@ def validate_document(document):
     if not isinstance(document, dict):
         return {'ok': False, 'issues': ['$: expected an object']}
     kind = document.get('kind')
+    if kind is None:
+        kind = next((name for key, name in VERSION_KEYS.items() if key in document), None)
     if not isinstance(kind, str) or kind not in SCHEMAS:
         return {'ok': False, 'issues': ['$.kind: unsupported document kind']}
     schema = json.loads(files('oap').joinpath('schemas').joinpath(SCHEMAS[kind]).read_text(encoding='utf-8'))

@@ -1,0 +1,10 @@
+[
+  {
+    "key_id": "sha256:6c8f8607dbe87077a62a2990ce07d94aaf749df76f87b98eb786a6d10f030765",
+    "public_key": "F8t5-ytBIPKx7GXkGY1uCLKOgT_rAeSkAIObheGAgM4",
+    "accepted_claim_types": [
+      "representation",
+      "union_status"
+    ]
+  }
+]

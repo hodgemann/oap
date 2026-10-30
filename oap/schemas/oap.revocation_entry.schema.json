@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oap:revocation_entry:0.5",
+  "type": "object",
+  "properties": {
+    "oap_revocation_entry_version": {
+      "type": "string",
+      "pattern": "^0\\.5\\.[0-9]+$"
+    },
+    "key_id": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "key_type": {
+      "enum": [
+        "agent_signing",
+        "director_recipient"
+      ]
+    },
+    "revoked_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "reason": {
+      "enum": [
+        "unspecified",
+        "compromised",
+        "retired",
+        "agency_change",
+        "superseded",
+        "policy_violation"
+      ]
+    },
+    "revoked_by": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "revoked_by_public_key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "minLength": 1
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "oap_revocation_entry_version",
+    "key_id",
+    "key_type",
+    "revoked_at",
+    "reason",
+    "revoked_by",
+    "revoked_by_public_key",
+    "signature"
+  ],
+  "additionalProperties": false
+}

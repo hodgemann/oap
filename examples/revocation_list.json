@@ -1,0 +1,23 @@
+{
+  "oap_revocation_list_version": "0.5.0",
+  "list_id": "urn:oap:revocation:list:vector",
+  "issued_at": "2026-10-02T00:00:00Z",
+  "next_update": "2026-10-09T00:00:00Z",
+  "signer": {
+    "key_id": "sha256:1325b850c2871916eae203f0efc3c8987f64e5e3cdb27679e6d1fa97808357e6",
+    "public_key": "oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA"
+  },
+  "entries": [
+    {
+      "oap_revocation_entry_version": "0.5.0",
+      "key_id": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d",
+      "key_type": "agent_signing",
+      "revoked_at": "2026-10-01T00:00:00Z",
+      "reason": "compromised",
+      "revoked_by": "sha256:1325b850c2871916eae203f0efc3c8987f64e5e3cdb27679e6d1fa97808357e6",
+      "revoked_by_public_key": "oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA",
+      "signature": "8tSWdCJCRh4q8uMNUWx0albGzUccovoeJwcQSMFjZvEihFnkqnXk3b1eDKx7Yi4hprUSdaryfHqGDg4J7ZxpAA"
+    }
+  ],
+  "signature": "QH_A_qhuafDqVP6eOtxNOCFCYE0CV5BIlYezBWf1gRQi1Rs4DCZvEwXZ4sjWi4HwAzAoo9S3NOx3WRsjnSt1CQ"
+}

@@ -10,8 +10,7 @@
 > deferred. Automatic rendering, watermarking, and expiration are not implemented.
 > The 0.4 candidate adds recipient-encrypted cast handover, exact signed
 > inventories, and fail-closed import/trust rules; see
-> [0.4 release notes](docs/RELEASE_NOTES_0.4.md). Attestations and
-> revocation remain future work.
+> [0.4 release notes](docs/RELEASE_NOTES_0.4.md). Signed revocation and attestation shipped in 0.5; the phased proposals below are historical.
 > See [the release notes](docs/RELEASE_NOTES_0.3.md)
 > for the actual scope and limits; the phase labels below are proposals, not
 > shipped capability claims.
@@ -203,3 +202,31 @@ graph TD
 1. **ComfyUI-OAP Custom Nodes**: Native visual workflow integration.
 2. **Multi-Modal Identity Extensions**: Expression anchors and audio latents.
 3. **Magic Wormhole Transport**: Direct box-to-box transport integration.
+
+
+## v0.5 shipped status and v0.6 transport plan
+
+OAP 0.5 ships signed key revocation lists, local revoker trust, signed
+attestations, issuer claim scopes, and package binding. Tier 2 short-lived key
+delivery remains unimplemented. The older proposal sections above are retained
+as historical design context.
+
+Magic Wormhole transport is planned for v0.6 and is not implemented. Proposed
+commands are `oap send --oap actor.oap` (optionally with repeatable
+`--revocation-list` and `--attestation`) and `oap receive --target ./incoming`
+(with local Agent, revoker, list, and issuer trust inputs). The sender shows a
+short Wormhole code; the receiver enters it. Transfer the `.oap` as an opaque
+bundle without decrypting sealed assets or requiring cloud storage or email.
+Stream large packages; after interruption, resume safely or retry cleanly.
+
+Each transferred file should have a SHA-256 checksum checked before use. A
+wrong code, checksum mismatch, incomplete transfer, or existing destination
+without explicit force must leave no partial import. After checksums, run
+normal package signature, local Agent trust, revocation, and attestation checks
+before import. Optional local transport receipts may record method,
+completion time, file paths, sizes, and hashes. They are outside the signed
+package and must exclude private keys and Wormhole codes.
+
+Acceptance tests should cover loopback, large and interrupted transfers, wrong
+codes, checksum mismatch, duplicate destinations, detached lists and
+attestations, and verification failure preventing import.

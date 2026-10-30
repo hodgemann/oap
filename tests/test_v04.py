@@ -61,20 +61,20 @@ def test_encrypted_handover_and_import(tmp_path):
         assert len([name for name in archive.namelist() if name.startswith('sealed/')]) == 1
         assert data not in full.read_bytes()
         assert manifest['protection']['tier'] == 1
-    assert not oap.verify_package(full)['ok']
-    assert oap.verify_package(full, known_agents=[agent['public_key']])['ok']
-    assert oap.verify_package(full, allow_untrusted=True)['integrity_ok']
+    assert not oap.verify_package(full, revocation_policy='ignore')['ok']
+    assert oap.verify_package(full, known_agents=[agent['public_key']], revocation_policy='ignore')['ok']
+    assert oap.verify_package(full, allow_untrusted=True, revocation_policy='ignore')['integrity_ok']
     wrong = oap.generate_recipient_identity()
     with pytest.raises(ValueError, match='not authorized'):
         oap.open_asset_buffer(full, 'identity/ref.bin', wrong['_private'],
-                              known_agents=[agent['public_key']])
+                              known_agents=[agent['public_key']], revocation_policy='ignore')
     assert oap.open_asset_buffer(full, 'identity/ref.bin', recipient['_private'],
-                                 known_agents=[agent['public_key']]) == data
+                                 known_agents=[agent['public_key']], revocation_policy='ignore') == data
     target = tmp_path / 'imported'
-    assert oap.import_actor(full, target, known_agents=[agent['public_key']])['ok']
+    assert oap.import_actor(full, target, known_agents=[agent['public_key']], revocation_policy='ignore')['ok']
     assert not (target / 'identity/ref.bin').exists()
     assert len(list((target / 'sealed').glob('*.bin'))) == 1
-    assert not oap.import_actor(full, target, known_agents=[agent['public_key']])['ok']
+    assert not oap.import_actor(full, target, known_agents=[agent['public_key']], revocation_policy='ignore')['ok']
 
 
 def test_missing_wrong_or_duplicate_recipient(tmp_path):
@@ -124,10 +124,10 @@ def test_archive_attacks_fail(tmp_path, attack):
     else:
         manifest['issued_at'] = '2026-01-01T00:00:00Z'
         rewrite_archive(original, bad, edits={'manifest.json': json.dumps(manifest).encode()})
-    checked = oap.verify_package(bad, known_agents=[agent['public_key']])
+    checked = oap.verify_package(bad, known_agents=[agent['public_key']], revocation_policy='ignore')
     assert not checked['ok'], attack
     assert not oap.import_actor(bad, tmp_path / 'target',
-                                known_agents=[agent['public_key']])['ok']
+                                known_agents=[agent['public_key']], revocation_policy='ignore')['ok']
     assert not (tmp_path / 'target').exists()
 
 
@@ -136,12 +136,12 @@ def test_sealed_stream_authentication_and_limits(tmp_path):
     full = tmp_path / 'full.oap'
     oap.package_actor(str(tmp_path), str(full), 'full', agent['_private'],
                       [recipient['public_key']])
-    assert not verify_v04(full, known_agents=[agent['public_key']], max_members=1)['ok']
-    assert not verify_v04(full, known_agents=[agent['public_key']], max_member=10)['ok']
-    assert not verify_v04(full, known_agents=[agent['public_key']], max_total=10)['ok']
+    assert not verify_v04(full, known_agents=[agent['public_key']], max_members=1, revocation_policy='ignore')['ok']
+    assert not verify_v04(full, known_agents=[agent['public_key']], max_member=10, revocation_policy='ignore')['ok']
+    assert not verify_v04(full, known_agents=[agent['public_key']], max_total=10, revocation_policy='ignore')['ok']
     with pytest.raises(ValueError, match='memory limit'):
         oap.open_asset_buffer(full, 'identity/ref.bin', recipient['_private'],
-                              known_agents=[agent['public_key']], max_bytes=4)
+                              known_agents=[agent['public_key']], max_bytes=4, revocation_policy='ignore')
     with zipfile.ZipFile(full) as archive:
         manifest = json.loads(archive.read('manifest.json'))
         sealed = manifest['assets'][1]['sealed']['path']
@@ -153,10 +153,10 @@ def test_sealed_stream_authentication_and_limits(tmp_path):
     bad = tmp_path / 'truncated.oap'
     rewrite_archive(full, bad, edits={'manifest.json': json.dumps(manifest).encode(),
                                       sealed: ciphertext[:-1]})
-    assert oap.verify_package(bad, known_agents=[agent['public_key']])['ok']
+    assert oap.verify_package(bad, known_agents=[agent['public_key']], revocation_policy='ignore')['ok']
     with pytest.raises(ValueError, match='truncated'):
         oap.open_asset_buffer(bad, 'identity/ref.bin', recipient['_private'],
-                              known_agents=[agent['public_key']])
+                              known_agents=[agent['public_key']], revocation_policy='ignore')
 
 
 def test_patch_version_and_duplicate_json_keys(tmp_path):
@@ -167,15 +167,15 @@ def test_patch_version_and_duplicate_json_keys(tmp_path):
     with zipfile.ZipFile(original) as archive:
         manifest = json.loads(archive.read('manifest.json'))
         raw = archive.read('manifest.json')
-    manifest['oap_version'] = '0.4.9'
+    manifest['oap_version'] = '0.5.9'
     oap.sign_manifest(manifest, agent['_private'])
     patch = tmp_path / 'patch.oap'
     rewrite_archive(original, patch, edits={'manifest.json': json.dumps(manifest).encode()})
-    assert oap.verify_package(patch, known_agents=[agent['public_key']])['ok']
+    assert oap.verify_package(patch, known_agents=[agent['public_key']], revocation_policy='ignore')['ok']
     duplicated = raw.replace(b'"issued_at":', b'"issued_at": "2026-01-01T00:00:00Z", "issued_at":', 1)
     bad = tmp_path / 'duplicate-key.oap'
     rewrite_archive(original, bad, edits={'manifest.json': duplicated})
-    assert not oap.verify_package(bad, known_agents=[agent['public_key']])['ok']
+    assert not oap.verify_package(bad, known_agents=[agent['public_key']], revocation_policy='ignore')['ok']
 
 
 def test_cli_keys_and_package(tmp_path, capsys):
@@ -207,7 +207,8 @@ def test_cli_keys_and_package(tmp_path, capsys):
                  '--recipient-key', str(recipient_public)]) == 0
     trust = tmp_path / 'trust.json'
     trust.write_text(json.dumps([source['agent']['public_key']]))
-    assert main(['verify', '--oap', str(output), '--known-agents', str(trust)]) == 0
+    assert main(['verify', '--oap', str(output), '--known-agents', str(trust),
+                 '--revocation-policy', 'ignore']) == 0
 
 
 def test_legacy_migration_requires_resigning(tmp_path):
@@ -224,14 +225,14 @@ def test_legacy_migration_requires_resigning(tmp_path):
     with zipfile.ZipFile(legacy, 'w') as archive:
         archive.writestr('manifest.json', json.dumps(manifest))
         archive.write(tmp_path / 'identity/ref.bin', 'identity/ref.bin')
-    assert not oap.verify_package(legacy, known_agents=[agent['public_key']])['ok']
+    assert not oap.verify_package(legacy, known_agents=[agent['public_key']], revocation_policy='ignore')['ok']
     assert oap.verify_package(legacy, legacy=True, strict=True, require_signature=True)['ok']
     new = tmp_path / 'migrated.oap'
     oap.migrate_legacy_package(legacy, new, agent['_private'], [recipient['public_key']],
                                known_agents=[agent['public_key']])
-    assert oap.verify_package(new, known_agents=[agent['public_key']])['ok']
+    assert oap.verify_package(new, known_agents=[agent['public_key']], revocation_policy='ignore')['ok']
     assert oap.open_asset_buffer(new, 'identity/ref.bin', recipient['_private'],
-                                 known_agents=[agent['public_key']]) == b'private actor pixels'
+                                 known_agents=[agent['public_key']], revocation_policy='ignore') == b'private actor pixels'
     agent_file, recipient_file = tmp_path / 'agent.key', tmp_path / 'recipient.pub'
     agent_file.write_text(agent['_private'])
     recipient_file.write_text(recipient['public_key'])
@@ -239,7 +240,7 @@ def test_legacy_migration_requires_resigning(tmp_path):
     assert main(['migrate', '--oap', str(legacy), '--out', str(migrated_cli),
                  '--sign-key-file', str(agent_file),
                  '--recipient-key', str(recipient_file)]) == 0
-    assert oap.verify_package(migrated_cli, known_agents=[agent['public_key']])['ok']
+    assert oap.verify_package(migrated_cli, known_agents=[agent['public_key']], revocation_policy='ignore')['ok']
 
 
 def test_fixed_signing_conformance_vectors():

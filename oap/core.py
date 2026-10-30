@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-oap_core.py -- Open Actor Protocol (OAP) v0.4 reference implementation.
+oap_core.py -- Open Actor Protocol (OAP) v0.5 reference implementation.
 
 Program-agnostic: any studio can import oap and speak the standard.
 
@@ -11,7 +11,9 @@ Capabilities:
   - import         install verified archive bytes without decrypting cast assets
   - check-call     compare a casting call against an actor's rider
   - studio-export  build an OAP manifest from a studio's actors/<id>/ folder
-  - studio-import  deprecated; encrypted 0.4 packages need studio-owned adapters
+  - studio-import  deprecated; encrypted packages need studio-owned adapters
+  - revoke-key, create-revocation-list, verify-revocation-list   key revocation
+  - attest, verify-attestation, attach-attestation, package-hash  attestations
 
 CLI:
   python oap/core.py identity --private-out AGENT.private.json --public-out AGENT.public.json
@@ -44,7 +46,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-OAP_VERSION = "0.4.0"
+OAP_VERSION = "0.5.0"
 
 # --- Rider enums (ordered; a project level must not exceed the rider level) ---
 CONTENT_ENUMS: Dict[str, List[str]] = {
@@ -245,7 +247,7 @@ def verify_signature(manifest: Dict[str, Any]) -> Tuple[bool, str]:
     if sig.get("algorithm", "ed25519") != "ed25519":
         return False, "unsupported signature algorithm"
     if supports_version(manifest.get("oap_version")) and set(sig) != {"algorithm", "value"}:
-        return False, "invalid OAP 0.4 signature descriptor"
+        return False, "invalid OAP signature descriptor"
     if not val or not pub:
         return False, "no signature or public key present"
     if not HAS_CRYPTO:
@@ -289,15 +291,18 @@ def iter_asset_refs(manifest: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
 # --------------------------------------------------------------------------- #
 def package_actor(source_dir: str, output_path: str, tier: str = "portfolio",
                   sign_key: Optional[str] = None,
-                  recipient_public_keys: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Create a signed OAP 0.4 archive; seal cast assets for named recipients."""
+                  recipient_public_keys: Optional[List[str]] = None,
+                  attestations: Optional[List[Any]] = None,
+                  revocation_metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Create a signed OAP 0.5 archive; seal cast assets for named recipients."""
     from oap.v04 import package_actor as package_v04
-    return package_v04(source_dir, output_path, tier, sign_key, recipient_public_keys)
+    return package_v04(source_dir, output_path, tier, sign_key, recipient_public_keys,
+                       attestations, revocation_metadata)
 
 
 def supports_version(version: str) -> bool:
-    """Normal readers accept OAP 0.4.x; older formats use explicit legacy mode."""
-    if not isinstance(version, str) or not re.fullmatch(r"0\.4\.[0-9]+", version):
+    """Signed-domain versions: 0.5.x, and 0.4.x; older formats use explicit legacy mode."""
+    if not isinstance(version, str) or not re.fullmatch(r"0\.(4|5)\.[0-9]+", version):
         return False
     return True
 
@@ -315,15 +320,18 @@ def verify_package(oap_path: str, require_signature: bool = False, strict: bool 
                    known_agents: Optional[List[str]] = None, *,
                    allow_untrusted: bool = False, legacy: bool = False,
                    max_members: Optional[int] = None, max_member: Optional[int] = None,
-                   max_total: Optional[int] = None) -> Dict[str, Any]:
-    """Verify an OAP 0.4 package; old formats need explicit legacy=True."""
+                   max_total: Optional[int] = None, **trust_options: Any) -> Dict[str, Any]:
+    """Verify an OAP 0.5 package; old formats need explicit legacy=True."""
+    if legacy and trust_options:
+        raise ValueError("revocation and attestation options do not apply to legacy mode")
     if not legacy:
         from oap.v04 import (verify_package as verify_v04, MAX_MEMBERS, MAX_MEMBER, MAX_TOTAL)
         return verify_v04(oap_path, known_agents=known_agents,
                           allow_untrusted=allow_untrusted,
                           max_members=MAX_MEMBERS if max_members is None else max_members,
                           max_member=MAX_MEMBER if max_member is None else max_member,
-                          max_total=MAX_TOTAL if max_total is None else max_total)
+                          max_total=MAX_TOTAL if max_total is None else max_total,
+                          **trust_options)
     try:
         return _verify_package(oap_path, require_signature, strict, known_agents)
     except (OSError, ValueError, TypeError, AttributeError, KeyError, zipfile.BadZipFile) as exc:
@@ -414,13 +422,13 @@ def _is_safe_path(base_dir: str, path: str) -> bool:
 
 def import_actor(oap_path: str, target_dir: str, verify: bool = True, *,
                  known_agents: Optional[List[str]] = None,
-                 allow_untrusted: bool = False) -> Dict[str, Any]:
-    """Install a verified 0.4 package without decrypting cast assets."""
+                 allow_untrusted: bool = False, **trust_options: Any) -> Dict[str, Any]:
+    """Install a verified package without decrypting cast assets."""
     if not verify:
-        return {"ok": False, "issues": ["OAP 0.4 import requires verification"], "extracted": False}
+        return {"ok": False, "issues": ["OAP import requires verification"], "extracted": False}
     from oap.v04 import import_actor as import_v04
     return import_v04(oap_path, target_dir, known_agents=known_agents,
-                      allow_untrusted=allow_untrusted)
+                      allow_untrusted=allow_untrusted, **trust_options)
 
 
 # --------------------------------------------------------------------------- #
@@ -638,8 +646,98 @@ def _write_identity_files(private_path: str, public_path: str,
         raise
 
 
+def _write_json(path: str, document: Any) -> None:
+    with open(path, "w", encoding="utf-8") as stream:
+        json.dump(document, stream, indent=2)
+        stream.write("\n")
+
+
+def _add_trust_flags(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--revocation-lists", action="append", default=[],
+                   help="revocation list file (a list or JSON array of lists); repeatable")
+    p.add_argument("--known-revokers", help="JSON array of trusted revocation signers")
+    p.add_argument("--attestation-issuers", help="JSON array of trusted attestation issuers")
+    p.add_argument("--revocation-policy", choices=["strict", "best_effort", "ignore"],
+                   help="default: strict with --known-revokers, otherwise quiet best_effort")
+    p.add_argument("--attestation-policy", default="verify_present",
+                   choices=["verify_present", "require", "ignore"])
+    p.add_argument("--allow-remote-revocation", action="store_true",
+                   help="fetch the https endpoints the manifest names; off by default")
+    p.add_argument("--require-package-bound-attestations", action="store_true")
+    p.add_argument("--allow-expired-attestations", action="store_true")
+    p.add_argument("--allow-legacy-manifest", action="store_true",
+                   help="accept a signed OAP 0.4 manifest")
+
+
+def _trust_options(args: argparse.Namespace) -> Dict[str, Any]:
+    from oap.trust import load_attestation_issuers, load_known_revokers, load_revocation_lists
+    return {
+        "revocation_lists": load_revocation_lists(args.revocation_lists),
+        "known_revokers": load_known_revokers(args.known_revokers) if args.known_revokers else None,
+        "attestation_issuers": (load_attestation_issuers(args.attestation_issuers)
+                                if args.attestation_issuers else None),
+        "revocation_policy": args.revocation_policy,
+        "attestation_policy": args.attestation_policy,
+        "allow_remote_revocation": args.allow_remote_revocation,
+        "require_package_bound_attestations": args.require_package_bound_attestations,
+        "allow_expired_attestations": args.allow_expired_attestations,
+        "allow_legacy_manifest": args.allow_legacy_manifest,
+    }
+
+
+def _revocation_metadata(args: argparse.Namespace) -> Optional[Dict[str, Any]]:
+    if not (args.revocation_list or args.revocation_endpoint or args.revocation_policy_metadata):
+        return None
+    metadata: Dict[str, Any] = {"lists": list(args.revocation_list),
+                                "endpoints": list(args.revocation_endpoint)}
+    if args.revocation_policy_metadata:
+        metadata["policy"] = args.revocation_policy_metadata
+    return metadata
+
+
+def _trust_command(args: argparse.Namespace) -> Dict[str, Any]:
+    from oap import trust, v04
+    if args.cmd == "revoke-key":
+        entry = trust.create_revocation_entry(args.key_id, args.key_type, args.reason,
+                                              _private_key_file(args.sign_key_file))
+        _write_json(args.out, entry)
+        return {"ok": True, "output": args.out, "key_id": args.key_id}
+    if args.cmd == "create-revocation-list":
+        entries: List[Any] = []
+        for path in args.entries:
+            loaded = trust.load_json_document(path)
+            entries.extend(loaded if isinstance(loaded, list) else [loaded])
+        document = trust.create_revocation_list(args.list_id, entries,
+                                                _private_key_file(args.sign_key_file),
+                                                next_update=args.next_update)
+        _write_json(args.out, document)
+        return {"ok": True, "output": args.out, "entries": len(document["entries"])}
+    if args.cmd == "verify-revocation-list":
+        revokers = trust.load_known_revokers(args.known_revokers) if args.known_revokers else []
+        return trust.verify_revocation_list(trust.load_json_document(args.list), revokers)
+    if args.cmd == "attest":
+        document = trust.create_attestation(
+            args.subject_actor_id, trust.load_json_document(args.claims_file),
+            _private_key_file(args.sign_key_file), issuer_name=args.issuer_name,
+            package_hash=args.package_hash, agent_key_id=args.agent_key_id,
+            expires_at=args.expires_at)
+        _write_json(args.out, document)
+        return {"ok": True, "output": args.out, "id": document["id"]}
+    if args.cmd == "verify-attestation":
+        return trust.verify_attestation(
+            trust.load_json_document(args.attestation),
+            trust.load_attestation_issuers(args.known_issuers),
+            trust.package_content_hash(args.package) if args.package else None,
+            allow_expired=args.allow_expired)
+    if args.cmd == "package-hash":
+        return {"ok": True, "package_hash": trust.package_content_hash(args.oap)}
+    result = v04.attach_attestations(args.oap, args.out, _private_key_file(args.sign_key_file),
+                                     args.attestation)
+    return {"ok": True, **result}
+
+
 def main(argv: Optional[List[str]] = None) -> int:
-    ap = argparse.ArgumentParser(prog="oap", description="OAP v0.4 reference tool")
+    ap = argparse.ArgumentParser(prog="oap", description="OAP v0.5 reference tool")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("identity", help="generate an Agent signing keypair")
@@ -656,25 +754,78 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--tier", default="portfolio", choices=list(TIER_MAX_CLEARANCE))
     p.add_argument("--sign-key-file", required=True, help="Agent identity JSON or private-key file")
     p.add_argument("--recipient-key", action="append", default=[], help="Director public identity JSON or key file; repeatable")
+    p.add_argument("--attestation", action="append", default=[], help="attestation file to embed; repeatable")
+    p.add_argument("--revocation-list", action="append", default=[], help="revocation list file to embed; repeatable")
+    p.add_argument("--revocation-policy-metadata", choices=["ignore", "embedded", "local", "remote_opt_in"],
+                   help="manifest hint; it never overrides the receiver's policy")
+    p.add_argument("--revocation-endpoint", action="append", default=[], help="https list URL; repeatable")
 
     p = sub.add_parser("verify", help="verify a .oap zip")
     p.add_argument("--oap", required=True)
     p.add_argument("--allow-untrusted", action="store_true", help="inspect valid signatures without local trust")
     p.add_argument("--legacy", action="store_true", help="explicitly inspect a 0.1-0.3 package")
     p.add_argument("--known-agents", help="JSON file containing a list of trusted public keys")
+    _add_trust_flags(p)
 
     p = sub.add_parser("import", help="extract + verify a .oap into a target dir")
     p.add_argument("--oap", required=True)
     p.add_argument("--target", required=True)
     p.add_argument("--known-agents", help="JSON list of locally trusted Agent public keys")
     p.add_argument("--allow-untrusted", action="store_true", help="explicitly accept a valid but unknown Agent key")
+    _add_trust_flags(p)
 
-    p = sub.add_parser("migrate", help="re-sign and seal a complete legacy package as OAP 0.4")
+    p = sub.add_parser("migrate", help="re-sign a 0.4 package, or seal a complete older package, as OAP 0.5")
     p.add_argument("--oap", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--sign-key-file", required=True)
-    p.add_argument("--recipient-key", action="append", default=[], required=True)
+    p.add_argument("--recipient-key", action="append", default=[], help="required for 0.1-0.3 packages")
     p.add_argument("--known-agents", help="optional legacy Agent trust file")
+    p.add_argument("--attestation-file", action="append", default=[], help="attestation to embed (0.4 sources); repeatable")
+    p.add_argument("--revocation-list", action="append", default=[], help="revocation list to embed (0.4 sources); repeatable")
+
+    p = sub.add_parser("revoke-key", help="create a signed revocation entry")
+    p.add_argument("--key-id", required=True)
+    p.add_argument("--key-type", required=True, choices=["agent_signing", "director_recipient"])
+    p.add_argument("--reason", required=True, choices=["unspecified", "compromised", "retired",
+                                                       "agency_change", "superseded", "policy_violation"])
+    p.add_argument("--sign-key-file", required=True)
+    p.add_argument("--out", required=True)
+
+    p = sub.add_parser("create-revocation-list", help="combine entries into a signed list")
+    p.add_argument("--list-id", required=True)
+    p.add_argument("--entries", action="append", required=True, help="entry file or JSON array; repeatable")
+    p.add_argument("--sign-key-file", required=True)
+    p.add_argument("--next-update", help="RFC 3339 time after which the list is expired")
+    p.add_argument("--out", required=True)
+
+    p = sub.add_parser("verify-revocation-list", help="verify a signed revocation list")
+    p.add_argument("--list", required=True)
+    p.add_argument("--known-revokers")
+
+    p = sub.add_parser("attest", help="create a signed attestation")
+    p.add_argument("--subject-actor-id", required=True)
+    p.add_argument("--claims-file", required=True)
+    p.add_argument("--sign-key-file", required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--issuer-name")
+    p.add_argument("--package-hash", help="bind to the value printed by package-hash")
+    p.add_argument("--agent-key-id")
+    p.add_argument("--expires-at")
+
+    p = sub.add_parser("verify-attestation", help="verify a detached attestation")
+    p.add_argument("--attestation", required=True)
+    p.add_argument("--known-issuers", required=True)
+    p.add_argument("--package", help="also check the binding against this package")
+    p.add_argument("--allow-expired", action="store_true")
+
+    p = sub.add_parser("package-hash", help="print the content hash attestations bind to")
+    p.add_argument("--oap", required=True)
+
+    p = sub.add_parser("attach-attestation", help="embed attestations without changing content")
+    p.add_argument("--oap", required=True)
+    p.add_argument("--attestation", action="append", required=True)
+    p.add_argument("--sign-key-file", required=True)
+    p.add_argument("--out", required=True)
 
     p = sub.add_parser("check-call", help="check a casting call against a rider")
     p.add_argument("--manifest", required=True)
@@ -685,7 +836,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--actor", required=True)
     p.add_argument("--out", required=True, help="output dir for manifest.json")
 
-    p = sub.add_parser("studio-import", help="deprecated: unavailable for encrypted OAP 0.4")
+    p = sub.add_parser("studio-import", help="deprecated: unavailable for encrypted OAP packages")
     p.add_argument("--oap", required=True)
     p.add_argument("--studio-root", required=True)
     p.add_argument("--actor", default=None)
@@ -707,6 +858,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--call", help="optionally check the exact casting call binding")
 
     args = ap.parse_args(argv)
+
+    if args.cmd in ("revoke-key", "create-revocation-list", "verify-revocation-list", "attest",
+                    "verify-attestation", "package-hash", "attach-attestation"):
+        try:
+            result = _trust_command(args)
+        except (OSError, ValueError, TypeError, KeyError, RuntimeError, zipfile.BadZipFile) as exc:
+            result = {"ok": False, "issues": [str(exc)]}
+        print(json.dumps(result, indent=2))
+        return 0 if result["ok"] else 1
 
     if args.cmd in ("validate", "sign-agreement", "verify-agreement"):
         # Keep module execution (python oap/core.py) and installed entry points usable.
@@ -743,7 +903,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             from oap.v04 import generate_recipient_identity
             ident = generate_recipient_identity()
         if not ident.get("_private"):
-            ap.error("cryptography is required for OAP 0.4 identities")
+            ap.error("cryptography is required for OAP identities")
         try:
             _write_identity_files(args.private_out, args.public_out, ident)
         except (OSError, ValueError) as exc:
@@ -757,7 +917,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         try:
             res = package_actor(args.source, args.out, args.tier,
                                 _private_key_file(args.sign_key_file),
-                                [_public_key_file(path) for path in args.recipient_key])
+                                [_public_key_file(path) for path in args.recipient_key],
+                                args.attestation, _revocation_metadata(args))
         except (OSError, ValueError, TypeError, KeyError) as exc:
             print(json.dumps({"ok": False, "issues": [str(exc)]}, indent=2))
             return 1
@@ -765,30 +926,48 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     if args.cmd == "verify":
-        res = verify_package(args.oap, require_signature=True, strict=True,
-                             known_agents=(load_known_agents(args.known_agents)
-                             if args.known_agents else None),
-                             allow_untrusted=args.allow_untrusted, legacy=args.legacy)
+        try:
+            res = verify_package(args.oap, require_signature=True, strict=True,
+                                 known_agents=(load_known_agents(args.known_agents)
+                                 if args.known_agents else None),
+                                 allow_untrusted=args.allow_untrusted, legacy=args.legacy,
+                                 **({} if args.legacy else _trust_options(args)))
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            res = {"ok": False, "issues": [str(exc)]}
         print(json.dumps(res, indent=2))
         return 0 if res["ok"] else 1
 
     if args.cmd == "import":
-        res = import_actor(args.oap, args.target,
-                           known_agents=(load_known_agents(args.known_agents)
-                           if args.known_agents else None),
-                           allow_untrusted=args.allow_untrusted)
-        print(json.dumps({k: res[k] for k in ("ok", "issues", "extracted")}, indent=2))
+        try:
+            res = import_actor(args.oap, args.target,
+                               known_agents=(load_known_agents(args.known_agents)
+                               if args.known_agents else None),
+                               allow_untrusted=args.allow_untrusted, **_trust_options(args))
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            res = {"ok": False, "issues": [str(exc)], "extracted": False}
+        print(json.dumps({k: v for k, v in res.items() if k != "manifest"}, indent=2))
         return 0 if res["ok"] else 1
 
     if args.cmd == "migrate":
         try:
-            from oap.v04 import migrate_legacy_package
-            res = migrate_legacy_package(
-                args.oap, args.out, _private_key_file(args.sign_key_file),
-                [_public_key_file(path) for path in args.recipient_key],
-                known_agents=(load_known_agents(args.known_agents)
-                              if args.known_agents else None))
-        except (OSError, ValueError, TypeError, KeyError) as exc:
+            from oap.v04 import migrate_legacy_package, migrate_v04_package, _strict_json
+            with zipfile.ZipFile(args.oap) as archive:
+                version = _strict_json(archive.read("manifest.json")).get("oap_version")
+            known = load_known_agents(args.known_agents) if args.known_agents else None
+            if isinstance(version, str) and version.startswith("0.4."):
+                metadata = {"lists": args.revocation_list} if args.revocation_list else None
+                res = migrate_v04_package(args.oap, args.out, _private_key_file(args.sign_key_file),
+                                          known_agents=known, attestations=args.attestation_file,
+                                          revocation_metadata=metadata)
+            else:
+                if not args.recipient_key:
+                    raise ValueError("--recipient-key is required for 0.1-0.3 packages")
+                if args.attestation_file or args.revocation_list:
+                    raise ValueError("migrate 0.1-0.3 packages first, then attach trust documents")
+                res = migrate_legacy_package(
+                    args.oap, args.out, _private_key_file(args.sign_key_file),
+                    [_public_key_file(path) for path in args.recipient_key], known_agents=known)
+        except (OSError, ValueError, TypeError, KeyError, zipfile.BadZipFile) as exc:
             print(json.dumps({"ok": False, "issues": [str(exc)]}, indent=2))
             return 1
         print(json.dumps(res, indent=2))
@@ -812,7 +991,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.cmd == "studio-import":
         print(json.dumps({"ok": False, "issues": [
-            "studio-import cannot install encrypted OAP 0.4 assets; use a studio-owned adapter"
+            "studio-import cannot install encrypted OAP assets; use a studio-owned adapter"
         ]}, indent=2))
         return 1
 

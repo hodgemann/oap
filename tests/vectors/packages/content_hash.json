@@ -1,0 +1,258 @@
+{
+  "manifest": {
+    "oap_version": "0.5.0",
+    "kind": "oap.actor.manifest",
+    "issued_at": "2026-10-02T00:00:00Z",
+    "identity": {
+      "actor_id": "urn:oap:actor:vector",
+      "display_name": "urn:oap:actor:vector",
+      "did": null,
+      "species": "ai_actor",
+      "born": "2026-10-02T00:00:00Z",
+      "homepage": null
+    },
+    "agent": {
+      "name": null,
+      "endpoint": null,
+      "public_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+      "payment": {
+        "methods": [],
+        "address": null
+      },
+      "rates": {
+        "audition": "free",
+        "per_scene": "",
+        "per_production": "",
+        "currency": "USD",
+        "notes": ""
+      }
+    },
+    "rider": {
+      "content": {
+        "nudity": "none",
+        "sexual_content": "none",
+        "blood_gore": "none",
+        "violence": "action"
+      },
+      "commercial": {
+        "political_ads": false,
+        "excluded_categories": [],
+        "excluded_brands": []
+      },
+      "usage": {
+        "voice_use": [
+          "dialogue"
+        ]
+      },
+      "notes": ""
+    },
+    "visual": {
+      "core_identity": "",
+      "default_wardrobe": "",
+      "wardrobe_is_identity": false,
+      "visual_contract": "",
+      "height": null,
+      "contract": {
+        "default_sheet": null,
+        "sheets": {}
+      },
+      "demo_reel": {
+        "file": null,
+        "clearance": "public",
+        "sha256": null
+      },
+      "sheets": [],
+      "lora": {
+        "file": null,
+        "clearance": "cast",
+        "sha256": null,
+        "recommended_strength": null
+      }
+    },
+    "voice": {
+      "status": "missing",
+      "provider": null,
+      "model": null,
+      "model_checkpoint_sha256": null,
+      "model_revision": null,
+      "profile_source": null,
+      "locked_seed": null,
+      "locked_params": null,
+      "anchor": {
+        "file": null,
+        "clearance": "cast",
+        "sha256": null
+      },
+      "anchor_transcript": null,
+      "profile": null,
+      "demo": {
+        "file": null,
+        "clearance": "public",
+        "sha256": null
+      }
+    },
+    "assets": [],
+    "protection": {
+      "tier": 0,
+      "mechanism": "plain",
+      "access_endpoint": null
+    },
+    "provenance": {
+      "audio_watermark": {
+        "scheme": "the_seal",
+        "status": "reserved"
+      },
+      "visual_watermark": {
+        "scheme": "c2pa",
+        "status": "reserved"
+      },
+      "training_disclosure": ""
+    },
+    "bundle": {
+      "tier": "portfolio",
+      "members": []
+    },
+    "signature": {
+      "algorithm": "ed25519",
+      "value": "7fSDOFBi65m7Egr9Eep6d9vLJAQm4plWzjmw8xrWAcOoN1GVlSwIs_Q-kltXRUCh2YmHSwKLuAW8EtwLYa5oDQ"
+    },
+    "revocation": {
+      "policy": "local",
+      "lists": [],
+      "endpoints": []
+    }
+  },
+  "manifest_with_attestation": {
+    "oap_version": "0.5.0",
+    "kind": "oap.actor.manifest",
+    "issued_at": "2026-10-02T00:00:00Z",
+    "identity": {
+      "actor_id": "urn:oap:actor:vector",
+      "display_name": "urn:oap:actor:vector",
+      "did": null,
+      "species": "ai_actor",
+      "born": "2026-10-02T00:00:00Z",
+      "homepage": null
+    },
+    "agent": {
+      "name": null,
+      "endpoint": null,
+      "public_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+      "payment": {
+        "methods": [],
+        "address": null
+      },
+      "rates": {
+        "audition": "free",
+        "per_scene": "",
+        "per_production": "",
+        "currency": "USD",
+        "notes": ""
+      }
+    },
+    "rider": {
+      "content": {
+        "nudity": "none",
+        "sexual_content": "none",
+        "blood_gore": "none",
+        "violence": "action"
+      },
+      "commercial": {
+        "political_ads": false,
+        "excluded_categories": [],
+        "excluded_brands": []
+      },
+      "usage": {
+        "voice_use": [
+          "dialogue"
+        ]
+      },
+      "notes": ""
+    },
+    "visual": {
+      "core_identity": "",
+      "default_wardrobe": "",
+      "wardrobe_is_identity": false,
+      "visual_contract": "",
+      "height": null,
+      "contract": {
+        "default_sheet": null,
+        "sheets": {}
+      },
+      "demo_reel": {
+        "file": null,
+        "clearance": "public",
+        "sha256": null
+      },
+      "sheets": [],
+      "lora": {
+        "file": null,
+        "clearance": "cast",
+        "sha256": null,
+        "recommended_strength": null
+      }
+    },
+    "voice": {
+      "status": "missing",
+      "provider": null,
+      "model": null,
+      "model_checkpoint_sha256": null,
+      "model_revision": null,
+      "profile_source": null,
+      "locked_seed": null,
+      "locked_params": null,
+      "anchor": {
+        "file": null,
+        "clearance": "cast",
+        "sha256": null
+      },
+      "anchor_transcript": null,
+      "profile": null,
+      "demo": {
+        "file": null,
+        "clearance": "public",
+        "sha256": null
+      }
+    },
+    "assets": [],
+    "protection": {
+      "tier": 0,
+      "mechanism": "plain",
+      "access_endpoint": null
+    },
+    "provenance": {
+      "audio_watermark": {
+        "scheme": "the_seal",
+        "status": "reserved"
+      },
+      "visual_watermark": {
+        "scheme": "c2pa",
+        "status": "reserved"
+      },
+      "training_disclosure": ""
+    },
+    "bundle": {
+      "tier": "portfolio",
+      "members": [
+        "attestations/a.json"
+      ]
+    },
+    "signature": {
+      "algorithm": "ed25519",
+      "value": "bNU9HkJhuPrcwlYomvIoE8SE1whutMSYxoPe0i0uLDgwjh4M7W10SV7q-enEsRAyQ5JMlmc_GuFQGR-hApZjAg"
+    },
+    "revocation": {
+      "policy": "local",
+      "lists": [],
+      "endpoints": []
+    },
+    "attestations": [
+      {
+        "file": "attestations/a.json",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "issuer_key_id": "sha256:6c8f8607dbe87077a62a2990ce07d94aaf749df76f87b98eb786a6d10f030765"
+      }
+    ]
+  },
+  "package_hash": "sha256:7ccc3abb221d6a41b575e1cf349ee4dafc0826c4dbb8fd52ee18c4b6cd44e620"
+}

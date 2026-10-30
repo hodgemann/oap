@@ -1,6 +1,6 @@
 # Open Actor Protocol (OAP)
-### A program-agnostic standard for casting, compensating, and protecting AI actors
-**Version 0.4.0 — Draft White Paper**
+### A program-agnostic standard for casting and compensating AI actors, with signed identity and terms
+**Version 0.5.0 — Draft White Paper**
 **Status:** Candidate implementation. Reference implementation: `oap/core.py` and `oap/v04.py`.
 
 ---
@@ -14,21 +14,21 @@ made by Directors on any compliant platform. OAP standardizes three things:
 2. **The Casting Handshake** — a machine-readable casting call, an audition flow, and a
    rider-compatibility check performed by the actor's **Agent**.
 3. **The Trust Spectrum** — a protection-tier model that accommodates everything from
-   100%-trust friend collaborations to zero-trust industry-grade engagements.
+   friend collaborations to engagements between parties who don't know each other.
 
 OAP is program-agnostic: any studio or builder can import `oap` and speak the standard.
 
 ## 2. Goals
 - Program-agnostic: any builder can `import oap` and speak the protocol.
-- Accommodate the full trust spectrum (open/CC → friends → strangers → zero-trust).
-- Protect actor IP (reference sheets, voice anchors) and Director IP (prompts, sets).
-- Pragmatic v0.4: recipient-encrypted handover without mandatory network infrastructure.
+- Accommodate a range of trust (open/CC → friends → strangers).
+- Limit exposure of actor IP (reference sheets, voice anchors) and Director IP (prompts, sets).
+- Pragmatic v0.5: recipient-encrypted handover without mandatory network infrastructure.
 - No drastic changes required for a host studio to comply.
 
-## 3. Non-Goals (v0.4)
+## 3. Non-Goals (v0.5)
 - No blockchain, no custom P2P overlay network, no mandatory cloud.
-- No enforced payment rails (rates are declarative; settlement is out of scope for v0.4).
-- No DRM hard-guarantees (see §14, honest limits).
+- No enforced payment rails (rates are declarative; settlement is out of scope for v0.5).
+- No DRM: OAP cannot control a recipient who has decrypted an asset (see §14).
 - Not a rendering protocol: OAP moves identity + contracts; the compliant program renders.
 
 ## 4. Roles
@@ -83,10 +83,10 @@ The manifest declares a protection tier describing how `cast`-clearance assets a
 | Tier | Name | Mechanism | Stops | Trust assumption |
 |---|---|---|---|---|
 | **0** | Open | Plain files on disk | Nothing | Friends / CC-licensed actors |
-| **1** | Recipient-encrypted handover | Cast assets encrypted; named recipient decrypts in memory | Casual copying | Director holds a separate X25519 key |
-| **2** | Key delivery + revocation | Director's program requests a short-lived, use-scoped key from the Actor's Agent; Agent can revoke/audit | Casual theft + adds kill-switch & accountability | Still local; relationship enforced |
-| **3** | Render proxy | Assets never delivered; rendering happens on Actor infra or a mutually-trusted service; only outputs return | Essentially everything | Needs infra; raises prompt-privacy tension |
-| **4** | Enclave (TEE) | Assets decryptable only inside a hardware enclave | Strongest local guarantee | Complex, hardware-dependent (future) |
+| **1** | Recipient-encrypted handover | Cast assets encrypted; named recipient decrypts in memory | Interception and exposure in storage; not the named recipient | Director holds a separate X25519 key and handles assets honestly |
+| **2** | Key delivery + revocation | Director's program requests a short-lived, use-scoped key from the Actor's Agent; Agent can revoke/audit | As Tier 1, plus an audit trail and no new keys after revocation; not copies already made | Still local; relies on the relationship |
+| **3** | Render proxy | Assets never delivered; rendering happens on Actor infra or a mutually-trusted service; only outputs return | Direct copying of assets; not capture of outputs | Needs infra; raises prompt-privacy tension |
+| **4** | Enclave (TEE) | Assets decryptable only inside a hardware enclave | Local copying, as far as the hardware holds | Complex, hardware-dependent (future) |
 
 **The reference packager writes plain public and audition assets (Tier 0) and
 recipient-encrypted cast assets in full packages (Tier 1). Tier 2 key
@@ -515,10 +515,13 @@ anti-abuse properties**:
 v0.2 reserves the attestation schema; it does not run a live ledger.
 
 ## 14. Honest Limits (DRM reality)
-On a general-purpose computer, if a program can read an asset, the human running it can —
-with enough effort — read it too. OAP therefore never promises "impossible to steal."
-It provides: (1) technical friction (tiers 1–4) that stops casual theft, (2) revocation and
-audit (tier 2), and (3) identity + contract + reputation that make theft consequence-laden.
+On a general-purpose computer, if a program can read an asset, the person running it can
+read it too, and can change that program. A recipient who has decrypted an asset can keep
+it, write it to disk, or skip revocation checks. OAP does not prevent this. It gives honest
+parties authenticity, tamper detection, encryption in transit and storage, and signed
+evidence of what was agreed, so misuse is a breach of a provable agreement. Revocation stops
+honest receivers trusting a key and only reaches those who get the list; it cannot recall
+copies. Keeping assets from the recipient requires not delivering them (Tier 3).
 
 ## 15. Studio adapters
 Each studio owns its import/export adapter and its actor-record schema. OAP
@@ -562,3 +565,62 @@ agreements begin at 0.3.x. Normal package verification requires 0.4.x.
 - **Future** — Magic Wormhole transport, Tier 2 key
   delivery/revocation, automated audition delivery, attestation schema, Tier 3 render
   proxy, Tier 4 enclave, watermark integration, settlement, and live reputation.
+
+## OAP 0.5: revocation and attestations
+
+A key ID is `sha256:` followed by lowercase SHA-256 hex of the raw 32-byte
+public key. Signed revocation entries contain `oap_revocation_entry_version`,
+`key_id`, `key_type` (`agent_signing` or `director_recipient`), `revoked_at`,
+`reason`, `revoked_by`, `revoked_by_public_key`, and `signature`. Signed lists
+contain `oap_revocation_list_version`, `list_id`, `issued_at`, `next_update`
+(or null for no expiry), `signer: {key_id, public_key}`, `entries`, and
+`signature`. The embedded public keys must match their key IDs. Entries and
+lists use separate v0.5 signing domains and canonical UTF-8 JSON.
+
+A trusted revoker may sign entries within its local `key_types` scope. An Agent
+can self-revoke its signing key. A self-signed list may convey that revocation,
+but **only a current list signed by a trusted revoker establishes coverage**.
+Expired lists still carry revocations, but provide no coverage. Strict checking
+requires coverage even when the list is empty; invalid lists fail under strict
+and best-effort policies. When the receiver sets no policy, naming any trusted
+revoker selects strict; otherwise best-effort applies without coverage warnings,
+since a revoked key still fails. Explicit `best_effort` reports those warnings.
+Lists relying on a revoked revoker's authority fail until removed or reissued. Revocation applies to the Agent key and every sealed
+asset recipient key. A revoked trusted revoker loses authority; revocation
+state is recomputed accordingly. Remote HTTPS retrieval requires explicit
+receiver opt-in; local lists support offline verification.
+
+The manifest may include `revocation: {policy, lists, endpoints}`. Its policy
+is sender metadata and never weakens the receiver's strict, best_effort, or
+ignore choice. An embedded policy requires a listed document. Detached and
+embedded lists both undergo signature and trust evaluation; embedded document
+hashes and the signed ZIP inventory are checked even when policy is ignore.
+
+An attestation has `oap_attestation_version`, `id`, `issued_at`, optional
+`expires_at`, `issuer: {name, key_id, public_key}`, `subject` with `actor_id`,
+optional `agent_key_id` and `package_hash`, `claims`, and `signature`. A receiver
+chooses trusted issuer public keys and allowed claim keys through
+`accepted_claim_types`. The package verifier checks issuer identity, signature,
+expiry, actor and Agent binding, claim scope, and package binding. Unknown or
+revoked issuers fail verification of present attestations. `require` also
+rejects absence; `ignore` skips attestation semantics while preserving package
+hash and inventory checks.
+
+The package content hash is SHA-256 of the v0.5 package-content domain and
+canonical manifest with `signature`, `attestations`, and `bundle.members`
+entries under `attestations/` removed. The remaining manifest still binds
+asset and sealed ciphertext hashes. This makes an attestation's package hash
+stable as attestations are attached. The supported workflow is `package`,
+`package-hash`, `attest --package-hash`, then `attach-attestation` with the Agent
+signing key. Attachment copies existing package members byte for byte and
+re-signs the updated manifest.
+
+`verify_package()` reports `ok`, `integrity_ok`, `signature_valid`,
+`agent_known`, `revocation_policy`, `revocation_ok`, `attestations_ok`, `revoked_keys`,
+`failed_attestations`, `warnings`, `checked`, and `issues`. The two policy status
+fields are null when their checks are ignored; `revocation_ok` is also null when
+best-effort checking had no current trusted list. `verify_attestation()` also
+reports `package_bound` and `package_binding_checked`; a detached bound
+attestation can verify without a supplied package hash, but its binding has
+then not been checked. Normal 0.5 verification requires an explicitly trusted Agent. Signed 0.4 manifests need explicit
+`allow_legacy_manifest`; new source manifests must use 0.5.

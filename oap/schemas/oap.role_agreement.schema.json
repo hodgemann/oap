@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:oap:role_agreement:0.4",
+  "$id": "urn:oap:role_agreement:0.5",
   "type": "object",
   "properties": {
     "oap_version": {
       "type": "string",
-      "pattern": "^0\\.(3|4)\\.[0-9]+$"
+      "pattern": "^0\\.(3|4|5)\\.[0-9]+$"
     },
     "kind": {
       "const": "oap.role_agreement"

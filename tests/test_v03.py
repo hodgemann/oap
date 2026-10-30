@@ -25,7 +25,11 @@ def test_schemas_and_examples():
     for path in Path('oap/schemas').glob('*.json'):
         Draft202012Validator.check_schema(json.loads(path.read_text()))
     for path in Path('examples').glob('*.json'):
+        if path.name.startswith('known_'):  # Local trust files, not protocol documents.
+            continue
         assert oap.validate_document(json.loads(path.read_text()))['ok'], path
+    assert oap.load_known_revokers('examples/known_revokers.json')
+    assert oap.load_attestation_issuers('examples/known_attestation_issuers.json')
     for version in ('0.1.9', '0.2.99', '0.3.50', '0.4.0'):
         manifest = oap.new_manifest('lead')
         manifest['oap_version'] = version
@@ -66,9 +70,9 @@ def test_audition_clearance_roundtrip(tmp_path):
             expected.remove('cast.bin')
             expected.add(next(name for name in result['included'] if name.startswith('sealed/')))
         assert set(result['included']) == expected | {'manifest.json'}
-        assert oap.verify_package(archive, known_agents=[agent['public_key']])['ok']
+        assert oap.verify_package(archive, known_agents=[agent['public_key']], revocation_policy='ignore')['ok']
         assert oap.import_actor(archive, str(tmp_path / tier),
-                                known_agents=[agent['public_key']])['ok']
+                                known_agents=[agent['public_key']], revocation_policy='ignore')['ok']
         with zipfile.ZipFile(archive) as zf:
             refs = json.loads(zf.read('manifest.json'))['assets']
             assert all(ref['sha256'] for ref in refs if ref['file'] in expected)

@@ -108,7 +108,7 @@ def test_packaging_portfolio_and_full_tier():
         assert "identity/ref.png" not in res_port["included"]
 
         # Verification of portfolio zip
-        v_port = verify_package(portfolio_zip, known_agents=[ident["public_key"]])
+        v_port = verify_package(portfolio_zip, known_agents=[ident["public_key"]], revocation_policy='ignore')
         assert v_port["ok"] is True
         assert v_port["signature_valid"] is True
         assert v_port["checked"] == 1
@@ -122,7 +122,7 @@ def test_packaging_portfolio_and_full_tier():
         assert "identity/ref.png" not in res_full["included"]
 
         # Verification of full zip
-        v_full = verify_package(full_zip, known_agents=[ident["public_key"]])
+        v_full = verify_package(full_zip, known_agents=[ident["public_key"]], revocation_policy='ignore')
         assert v_full["ok"] is True
         assert v_full["signature_valid"] is True
         assert v_full["checked"] == 2
@@ -161,7 +161,7 @@ def test_verify_detects_tampered_signature():
                     content = json.dumps(m_data).encode("utf-8")
                 zout.writestr(item, content)
 
-        v = verify_package(bad_zip)
+        v = verify_package(bad_zip, revocation_policy='ignore')
         assert v["ok"] is False
         assert v["signature_valid"] is False
         assert any("signature" in issue for issue in v["issues"])
@@ -198,7 +198,7 @@ def test_verify_detects_tampered_asset():
                     content = b"tampered_bytes"
                 zout.writestr(item, content)
 
-        v = verify_package(bad_zip, known_agents=[ident["public_key"]])
+        v = verify_package(bad_zip, known_agents=[ident["public_key"]], revocation_policy='ignore')
         assert v["ok"] is False
         assert any("hash or size mismatch" in issue for issue in v["issues"])
 
@@ -219,7 +219,7 @@ def test_import_actor_rejects_zip_slip():
             zf.writestr("../../escape.txt", "pwned")
 
         dest = os.path.join(td, "import_target")
-        res = import_actor(bad_zip, dest)
+        res = import_actor(bad_zip, dest, revocation_policy='ignore')
         assert res["ok"] is False
         assert any("unsafe" in issue for issue in res["issues"])
         assert not os.path.exists(os.path.join(td, "escape.txt"))

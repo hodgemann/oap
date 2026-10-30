@@ -42,17 +42,17 @@ def test_generic_assets_roundtrip(tmp_path):
     oap.package_actor(str(tmp_path), str(path), 'full', identity['_private'],
                       [recipient['public_key']])
     result = oap.verify_package(path, require_signature=True, strict=True,
-                                known_agents=[identity['public_key']])
+                                known_agents=[identity['public_key']], revocation_policy='ignore')
     assert result['ok'] and result['agent_known'] and result['checked'] == 2
-    assert oap.verify_package(path, known_agents=[])['agent_known'] is False
-    assert oap.verify_package(path)['agent_known'] is None
+    assert oap.verify_package(path, known_agents=[], revocation_policy='ignore')['agent_known'] is False
+    assert oap.verify_package(path, revocation_policy='ignore')['agent_known'] is None
     assert oap.import_actor(path, str(tmp_path / 'installed'),
-                            known_agents=[identity['public_key']])['ok']
+                            known_agents=[identity['public_key']], revocation_policy='ignore')['ok']
     assert not (tmp_path / 'installed/personality.md').exists()
     assert oap.open_asset_buffer(path, 'personality.md', recipient['_private'],
-                                 known_agents=[identity['public_key']]) == b'personality.md'
+                                 known_agents=[identity['public_key']], revocation_policy='ignore') == b'personality.md'
     oap.package_actor(str(tmp_path), str(path), 'portfolio', identity['_private'])
-    assert oap.verify_package(path, known_agents=[identity['public_key']])['checked'] == 1
+    assert oap.verify_package(path, known_agents=[identity['public_key']], revocation_policy='ignore')['checked'] == 1
     with zipfile.ZipFile(path) as archive:
         assert 'personality.md' not in archive.namelist()
         assert json.loads(archive.read('manifest.json'))['assets'][0]['sha256'] is None
@@ -61,20 +61,20 @@ def test_generic_assets_roundtrip(tmp_path):
 def test_generic_asset_tamper(tmp_path):
     manifest = oap.new_manifest('lead')
     manifest['assets'] = [{'file': 'personality.md', 'sha256': 'wrong', 'role': 'personality'}]
-    assert not oap.verify_package(bundle(tmp_path, manifest, {'personality.md': b'changed'}))['ok']
+    assert not oap.verify_package(bundle(tmp_path, manifest, {'personality.md': b'changed'}), revocation_policy='ignore')['ok']
 
 
 @pytest.mark.parametrize('name', ['/absolute', '../escape', 'a/../escape', 'a\\evil', 'C:evil', 'C:/evil', 'a//evil'])
 def test_strict_unsafe_and_import(tmp_path, name):
     path = bundle(tmp_path, entries={name: b'bad'})
-    result = oap.verify_package(path, strict=True)
+    result = oap.verify_package(path, strict=True, revocation_policy='ignore')
     assert not result['ok'] and any('unsafe' in issue for issue in result['issues'])
     assert not oap.import_actor(path, str(tmp_path / 'imported'), verify=False)['ok']
 
 
 def test_strict_signature_and_extras(tmp_path, capsys):
     path = bundle(tmp_path, entries={'stray.txt': b'x', 'signatures/note': b'ok'})
-    assert not oap.verify_package(path)['ok']
+    assert not oap.verify_package(path, revocation_policy='ignore')['ok']
     assert oap.verify_package(path, legacy=True)['ok']
     assert not oap.verify_package(path, legacy=True, require_signature=True)['ok']
     assert not oap.verify_package(path, legacy=True, strict=True)['ok']
@@ -189,25 +189,25 @@ def test_deprecated_bridge_preserves_files_and_refuses_overwrite(tmp_path):
 
 
 @pytest.mark.parametrize('version,accepted', [('0.1.0', False), ('0.1.99', False),
-    ('0.2.0', False), ('0.2.100', False), ('0.3.0', False), ('0.3.100', False), ('0.4.0', True), ('1.0.0', False),
+    ('0.2.0', False), ('0.2.100', False), ('0.3.0', False), ('0.3.100', False), ('0.4.0', True), ('0.5.0', True), ('1.0.0', False),
     ('0.2', False), (None, False)])
 def test_version_policy(tmp_path, version, accepted):
     manifest = oap.new_manifest('lead')
     manifest['oap_version'] = version
     manifest['unknown_future_key'] = {'preserve': True}
     assert oap.supports_version(version) is accepted
-    # A manifest alone is never a valid signed 0.4 package.
-    assert not oap.verify_package(bundle(tmp_path, manifest))['ok']
+    # A manifest alone is never a valid signed package.
+    assert not oap.verify_package(bundle(tmp_path, manifest), revocation_policy='ignore')['ok']
 
 
 def test_malformed_packages_fail_verification(tmp_path):
     path = tmp_path / 'invalid.oap'
     path.write_bytes(b'not a zip')
-    assert not oap.verify_package(path)['ok']
+    assert not oap.verify_package(path, revocation_policy='ignore')['ok']
     for content in ['[]', 'null', '{"visual": []}']:
         with zipfile.ZipFile(path, 'w') as archive:
             archive.writestr('manifest.json', content)
-        assert not oap.verify_package(path)['ok']
+        assert not oap.verify_package(path, revocation_policy='ignore')['ok']
 
 
 def test_palette_transparency_survives_cleaning(tmp_path):
@@ -246,7 +246,7 @@ def test_pack_clears_stale_signature(tmp_path):
     (tmp_path / 'manifest.json').write_text(json.dumps(manifest))
     path = tmp_path / 'out.oap'
     oap.package_actor(str(tmp_path), str(path), sign_key=identity['_private'])
-    assert oap.verify_package(path, known_agents=[identity['public_key']])['ok']
+    assert oap.verify_package(path, known_agents=[identity['public_key']], revocation_policy='ignore')['ok']
     with zipfile.ZipFile(path) as archive:
         assert json.loads(archive.read('manifest.json'))['signature']['value'] != manifest['signature']['value']
 
@@ -267,5 +267,6 @@ def test_cli_trust_store_and_signed_package(tmp_path, capsys):
     trusted = tmp_path / 'known_agents.json'
     trusted.write_text(json.dumps([identity['public_key']]))
     assert main(['verify', '--oap', str(path),
-                 '--known-agents', str(trusted)]) == 0
+                 '--known-agents', str(trusted),
+                 '--revocation-policy', 'ignore']) == 0
     assert json.loads(capsys.readouterr().out)['ok'] is True

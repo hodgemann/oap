@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:oap:actor.manifest:0.4",
+  "$id": "urn:oap:actor.manifest:0.5",
   "type": "object",
   "properties": {
     "oap_version": {
       "type": "string",
-      "pattern": "^0\\.(1|2|3|4)\\.[0-9]+$"
+      "pattern": "^0\\.(1|2|3|4|5)\\.[0-9]+$"
     },
     "issued_at": {
       "type": "string",
@@ -584,6 +584,74 @@
     },
     "provenance": {
       "type": "object"
+    },
+    "attestations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "pattern": "^attestations/[A-Za-z0-9._-]+\\.json$"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "issuer_key_id": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "file",
+          "sha256",
+          "issuer_key_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "revocation": {
+      "type": "object",
+      "properties": {
+        "policy": {
+          "enum": [
+            "ignore",
+            "embedded",
+            "local",
+            "remote_opt_in"
+          ]
+        },
+        "lists": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": "string",
+                "pattern": "^revocations/[A-Za-z0-9._-]+\\.json$"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "file",
+              "sha256"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "endpoints": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^https://"
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "required": [

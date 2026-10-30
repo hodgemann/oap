@@ -14,7 +14,9 @@ def document_sha256(document):
 
 def _payload(agreement):
     body = {key: value for key, value in agreement.items() if key != 'signatures'}
-    domain = (b'OAP role agreement v0.4\x00' if agreement.get('oap_version', '').startswith('0.4.')
+    version = agreement.get('oap_version', '')
+    domain = (b'OAP role agreement v0.5\x00' if version.startswith('0.5.')
+              else b'OAP role agreement v0.4\x00' if version.startswith('0.4.')
               else b'OAP role agreement v0.3\x00')
     return domain + json.dumps(
         body, sort_keys=True, separators=(',', ':'), allow_nan=False).encode('utf-8')
@@ -33,7 +35,7 @@ def new_role_agreement(manifest, casting_call, accepted_compensation, agreement_
     if manifest['kind'] != 'oap.actor.manifest' or casting_call['kind'] != 'oap.casting_call':
         raise ValueError('expected actor manifest and casting call')
     result = {
-        'oap_version': '0.4.0', 'kind': 'oap.role_agreement',
+        'oap_version': '0.5.0', 'kind': 'oap.role_agreement',
         'agreement_id': agreement_id, 'call_id': casting_call['call_id'],
         'actor_did': manifest['identity'].get('did'),
         'agent_did': 'oap:ed25519:' + (manifest.get('agent', {}).get('public_key') or ''),
